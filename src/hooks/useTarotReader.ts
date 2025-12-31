@@ -14,6 +14,7 @@ interface Candidate {
 
 interface UseTarotReaderReturn {
   isCvLoaded: boolean;
+  isMasterReady: boolean;
   isAnalyzing: boolean;
   hasSavedImage: boolean;
   candidates: Candidate[];
@@ -27,8 +28,61 @@ interface UseTarotReaderReturn {
 
 const STORAGE_KEY = 'tarot-captured-image';
 
+// 大アルカナ22枚のIDリスト
+const MAJOR_ARCANA_IDS = [
+  'FOOL',
+  'MAGICIAN',
+  'HIGHPRIESTESS',
+  'EMPRESS',
+  'EMPEROR',
+  'HIEROPHANT',
+  'LOVERS',
+  'CHARIOT',
+  'STRENGTH',
+  'HERMIT',
+  'WHEELOFFORTUNE',
+  'JUSTICE',
+  'HANGEDMAN',
+  'DEATH',
+  'TEMPERANCE',
+  'DEVIL',
+  'TOWER',
+  'STAR',
+  'MOON',
+  'SUN',
+  'JUDGEMENT',
+  'WORLD',
+] as const;
+
+// カードIDから表示名へのマッピング
+const CARD_DISPLAY_NAMES: Record<string, string> = {
+  FOOL: 'THE FOOL',
+  MAGICIAN: 'THE MAGICIAN',
+  HIGHPRIESTESS: 'THE HIGH PRIESTESS',
+  EMPRESS: 'THE EMPRESS',
+  EMPEROR: 'THE EMPEROR',
+  HIEROPHANT: 'THE HIEROPHANT',
+  LOVERS: 'THE LOVERS',
+  CHARIOT: 'THE CHARIOT',
+  STRENGTH: 'STRENGTH',
+  HERMIT: 'THE HERMIT',
+  WHEELOFFORTUNE: 'WHEEL OF FORTUNE',
+  JUSTICE: 'JUSTICE',
+  HANGEDMAN: 'THE HANGED MAN',
+  DEATH: 'DEATH',
+  TEMPERANCE: 'TEMPERANCE',
+  DEVIL: 'THE DEVIL',
+  TOWER: 'THE TOWER',
+  STAR: 'THE STAR',
+  MOON: 'THE MOON',
+  SUN: 'THE SUN',
+  JUDGEMENT: 'JUDGEMENT',
+  WORLD: 'THE WORLD',
+};
+
 export function useTarotReader(): UseTarotReaderReturn {
   const [isCvLoaded, setIsCvLoaded] = useState(false);
+  const [isMasterReady, setIsMasterReady] = useState(false);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [hasSavedImage, setHasSavedImage] = useState(false);
   const [candidates, setCandidates] = useState<Candidate[]>([]);
@@ -38,7 +92,8 @@ export function useTarotReader(): UseTarotReaderReturn {
   const animationFrameRef = useRef<number | null>(null);
   const savedImageRef = useRef<string | null>(null);
   const savedImageElementRef = useRef<HTMLImageElement | null>(null);
-  const masterDataRef = useRef<Record<string, MasterData>>({});
+  // Map構造で特徴量をキャッシュ
+  const masterDataMapRef = useRef<Map<string, MasterData>>(new Map());
 
   // OpenCV.jsのロード
   useEffect(() => {
@@ -98,12 +153,12 @@ export function useTarotReader(): UseTarotReaderReturn {
     }
   }, []);
 
-  // マスターデータのロードとORB特徴量計算
+  // マスターデータのロードとORB特徴量計算（動的ロード）
   useEffect(() => {
     if (!isCvLoaded) return;
 
-    const loadMasterData = async (cardName: string, imagePath: string): Promise<void> => {
-      return new Promise((resolve, reject) => {
+    const loadMasterData = async (cardId: string, imagePath: string): Promise<boolean> => {
+      return new Promise((resolve) => {
         const img = new Image();
         img.onload = () => {
           try {
@@ -117,39 +172,50 @@ export function useTarotReader(): UseTarotReaderReturn {
 
             orb.detectAndCompute(gray, new window.cv.Mat(), keypoints, descriptors);
 
-            masterDataRef.current[cardName] = {
+            const cardName = CARD_DISPLAY_NAMES[cardId] || cardId;
+            masterDataMapRef.current.set(cardId, {
               keypoints,
               descriptors,
-            };
+            });
 
-            console.log(`${cardName}: 特徴点 ${keypoints.size()} 個、記述子サイズ ${descriptors.rows}x${descriptors.cols}`);
+            console.log(`✓ ${cardName} (${cardId}): 特徴点 ${keypoints.size()} 個、記述子サイズ ${descriptors.rows}x${descriptors.cols}`);
 
             // メモリ解放（keypointsとdescriptorsは保持するため削除しない）
             src.delete();
             gray.delete();
             orb.delete();
 
-            resolve();
+            resolve(true);
           } catch (error) {
-            console.error(`${cardName}の特徴量計算エラー:`, error);
-            reject(error);
+            console.error(`✗ ${cardId}の特徴量計算エラー:`, error);
+            resolve(false);
           }
         };
         img.onerror = () => {
-          console.error(`${cardName}の画像ロードエラー: ${imagePath}`);
-          reject(new Error(`Failed to load ${imagePath}`));
+          console.warn(`✗ ${cardId}の画像が見つかりません: ${imagePath} (スキップします)`);
+          resolve(false);
         };
         img.src = imagePath;
       });
     };
 
     const initializeMasterData = async () => {
-      try {
-        await loadMasterData('THE SUN', '/master/SUN.jpg');
-        await loadMasterData('THE FOOL', '/master/FOOL.jpg');
-        console.log('マスターデータの初期化が完了しました');
-      } catch (error) {
-        console.error('マスターデータの初期化エラー:', error);
+      console.log('マスターデータの初期化を開始...');
+      const loadPromises = MAJOR_ARCANA_IDS.map((cardId) =>
+        loadMasterData(cardId, `/master/${cardId}.jpg`)
+      );
+
+      const results = await Promise.all(loadPromises);
+      const successCount = results.filter((r) => r).length;
+      const totalCount = MAJOR_ARCANA_IDS.length;
+
+      console.log(`マスターデータの初期化が完了しました: ${successCount}/${totalCount} 枚のカードをロード`);
+      
+      if (successCount > 0) {
+        setIsMasterReady(true);
+        console.log(`利用可能なカード: ${Array.from(masterDataMapRef.current.keys()).join(', ')}`);
+      } else {
+        console.error('マスターデータが1枚もロードできませんでした');
       }
     };
 
@@ -278,7 +344,7 @@ export function useTarotReader(): UseTarotReaderReturn {
 
   // 画像マッチング処理
   const performMatching = useCallback(async (imageElement: HTMLImageElement | HTMLCanvasElement) => {
-    if (!isCvLoaded || Object.keys(masterDataRef.current).length === 0) {
+    if (!isCvLoaded || masterDataMapRef.current.size === 0) {
       console.warn('OpenCVがロードされていないか、マスターデータが初期化されていません');
       return;
     }
@@ -299,40 +365,53 @@ export function useTarotReader(): UseTarotReaderReturn {
 
       // BFMatcherでマッチング
       const matcher = createBFMatcher(window.cv.NORM_HAMMING, false);
-      const matchResults: Record<string, number> = {};
+      const matchResults: Map<string, number> = new Map();
 
-      for (const [cardName, master] of Object.entries(masterDataRef.current)) {
+      // すべてのマスターデータと比較
+      for (const [cardId, master] of masterDataMapRef.current.entries()) {
         const matches = new window.cv.DMatchVector();
         matcher.match(descriptors, master.descriptors, matches);
 
-        // Good Matchesを計算（距離が小さいものをフィルタリング）
+        // Good Matchesを計算（距離が小さいものを厳格にフィルタリング）
         const goodMatches: any[] = [];
         const matchCount = matches.size();
         
+        // 距離の最小値を計算（より厳格なフィルタリングのため）
+        let minDistance = Infinity;
         for (let i = 0; i < matchCount; i++) {
           const match = matches.get(i);
-          if (match.distance < 50) { // 閾値は調整可能
+          if (match.distance < minDistance) {
+            minDistance = match.distance;
+          }
+        }
+
+        // Good Matches: 最小距離の2倍以下（Lowe's ratio testの簡易版）
+        const threshold = Math.max(30, minDistance * 2);
+        for (let i = 0; i < matchCount; i++) {
+          const match = matches.get(i);
+          if (match.distance < threshold) {
             goodMatches.push(match);
           }
         }
 
         const goodMatchCount = goodMatches.length;
-        matchResults[cardName] = goodMatchCount;
+        const cardName = CARD_DISPLAY_NAMES[cardId] || cardId;
+        matchResults.set(cardId, goodMatchCount);
         
-        console.log(`${cardName}: 総マッチ数 ${matchCount}, Good Matches ${goodMatchCount}`);
+        console.log(`${cardName} (${cardId}): 総マッチ数 ${matchCount}, Good Matches ${goodMatchCount} (閾値: ${threshold.toFixed(1)})`);
 
         matches.delete();
       }
 
       // スコアが高い順にソートしてCandidate配列に変換
-      const sortedCandidates: Candidate[] = Object.entries(matchResults)
+      const sortedCandidates: Candidate[] = Array.from(matchResults.entries())
         .sort(([, a], [, b]) => b - a)
-        .map(([cardName, matchCount]) => ({
-          cardName,
+        .map(([cardId, matchCount]) => ({
+          cardName: CARD_DISPLAY_NAMES[cardId] || cardId,
           matchCount,
         }));
 
-      console.log('マッチング結果:', matchResults);
+      console.log('マッチング結果:', Array.from(matchResults.entries()).map(([id, count]) => `${CARD_DISPLAY_NAMES[id] || id}: ${count}`).join(', '));
       console.log('候補順位:', sortedCandidates.map(c => `${c.cardName}: ${c.matchCount} matches`));
 
       setCandidates(sortedCandidates);
@@ -398,11 +477,34 @@ export function useTarotReader(): UseTarotReaderReturn {
     setBlacklist((prev) => [...prev, card]);
   }, []);
 
+  // メモリ解放の自動化（クリーンアップ処理）
+  useEffect(() => {
+    return () => {
+      // ページを離れる際や再読み込み時に、Map内のcv.Matオブジェクトをすべて削除
+      console.log('マスターデータのメモリを解放中...');
+      for (const [cardId, masterData] of masterDataMapRef.current.entries()) {
+        try {
+          if (masterData.keypoints) {
+            masterData.keypoints.delete();
+          }
+          if (masterData.descriptors) {
+            masterData.descriptors.delete();
+          }
+        } catch (error) {
+          console.warn(`${cardId}のメモリ解放エラー:`, error);
+        }
+      }
+      masterDataMapRef.current.clear();
+      console.log('マスターデータのメモリ解放が完了しました');
+    };
+  }, []);
+
   // フィルタリングされた候補
   const filteredCandidates = candidates.filter((c) => !blacklist.includes(c.cardName));
 
   return {
     isCvLoaded,
+    isMasterReady,
     isAnalyzing,
     hasSavedImage,
     candidates: filteredCandidates,

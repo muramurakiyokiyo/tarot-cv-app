@@ -5,6 +5,7 @@ import { useTarotReader } from '@/src/hooks/useTarotReader';
 export function CameraView() {
   const {
     isCvLoaded,
+    isMasterReady,
     isAnalyzing,
     hasSavedImage,
     candidates,
@@ -21,6 +22,11 @@ export function CameraView() {
       {!isCvLoaded && (
         <div className="absolute top-4 left-4 bg-yellow-500 text-white px-4 py-2 rounded z-10">
           OpenCV.jsをロード中...
+        </div>
+      )}
+      {isCvLoaded && !isMasterReady && (
+        <div className="absolute top-4 left-4 bg-orange-500 text-white px-4 py-2 rounded z-10">
+          マスターデータを準備中...
         </div>
       )}
       {isAnalyzing && (
@@ -50,7 +56,7 @@ export function CameraView() {
         {!hasSavedImage ? (
           <button
             onClick={captureImage}
-            disabled={!isCvLoaded}
+            disabled={!isCvLoaded || !isMasterReady}
             className="px-6 py-3 bg-blue-600 text-white rounded-lg font-semibold disabled:bg-gray-500 disabled:cursor-not-allowed hover:bg-blue-700 transition-colors"
           >
             画像を撮影
