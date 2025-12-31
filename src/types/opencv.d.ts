@@ -12,6 +12,7 @@ declare global {
       imshow: (canvasId: string | HTMLCanvasElement, mat: any) => void;
       cvtColor: (src: any, dst: any, code: number, dstCn?: number) => void;
       COLOR_RGBA2GRAY: number;
+      COLOR_GRAY2RGBA: number;
       addWeighted: (src1: any, alpha: number, src2: any, beta: number, gamma: number, dst: any) => void;
       bitwise_not: (src: any, dst: any) => void;
       waitKey: (delay: number) => number;
@@ -31,10 +32,24 @@ declare global {
       Canny: (image: any, edges: any, threshold1: number, threshold2: number, apertureSize?: number, L2gradient?: boolean) => void;
       threshold: (src: any, dst: any, thresh: number, maxval: number, type: number) => number;
       findContours: (image: any, contours: any, hierarchy: any, mode: number, method: number, offset?: any) => void;
+      dilate: (src: any, dst: any, kernel: any, anchor?: any, iterations?: number, borderType?: number, borderValue?: any) => void;
+      getStructuringElement: (shape: number, ksize: any, anchor?: any) => any;
+      MORPH_RECT: number;
+      Size: {
+        new (width: number, height: number): any;
+      };
+      Point: {
+        new (x?: number, y?: number): any;
+      };
+      BORDER_CONSTANT: number;
+      morphologyDefaultBorderValue: () => any;
       contourArea: (contour: any, oriented?: boolean) => number;
       approxPolyDP: (curve: any, approxCurve: any, epsilon: number, closed: boolean) => void;
       arcLength: (curve: any, closed: boolean) => number;
       ContourVector: {
+        new (): any;
+      };
+      MatVector: {
         new (): any;
       };
       PointVector: {
@@ -60,6 +75,9 @@ declare global {
     delete: () => void;
     rows: number;
     cols: number;
+    data32S: Int32Array;
+    data32F: Float32Array;
+    data8U: Uint8Array;
   }
   
   interface ORB {
@@ -107,6 +125,13 @@ declare global {
     size: () => number;
     get: (index: number) => any;
     push_back: (contour: any) => void;
+    delete: () => void;
+  }
+  
+  interface MatVector {
+    size: () => number;
+    get: (index: number) => any;
+    push_back: (mat: any) => void;
     delete: () => void;
   }
   
