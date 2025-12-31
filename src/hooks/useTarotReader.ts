@@ -373,6 +373,12 @@ export function useTarotReader(): UseTarotReaderReturn {
       return;
     }
 
+    // video要素が設定されていて、ストリームが保持されている場合は設定
+    if (videoRef.current && cameraStreamRef.current && !videoRef.current.srcObject) {
+      console.log('[カメラ] video要素が設定されたので、ストリームを設定します');
+      videoRef.current.srcObject = cameraStreamRef.current;
+    }
+
     // デバッグ情報を更新
     const video = videoRef.current;
     const stream = video?.srcObject as MediaStream | null;
@@ -385,7 +391,7 @@ export function useTarotReader(): UseTarotReaderReturn {
       canvasHeight: canvas.height,
       isVideoPlaying: !!(video && !video.paused && !video.ended && video.readyState > 2),
       hasVideoElement: !!video,
-      hasStream: !!stream,
+      hasStream: !!(stream || cameraStreamRef.current),
     }));
 
     // OpenCVが利用可能か確認
@@ -751,9 +757,12 @@ export function useTarotReader(): UseTarotReaderReturn {
     };
   }, [isCvLoaded, drawLoop]);
 
+  // カメラストリームを保持するref
+  const cameraStreamRef = useRef<MediaStream | null>(null);
+
   // カメラストリームの開始
   useEffect(() => {
-    if (!hasSavedImage && videoRef.current) {
+    if (!hasSavedImage) {
       // デバッグ情報を更新（カメラアクセス試行中）
       setDebugInfo((prev) => ({
         ...prev,
@@ -769,17 +778,24 @@ export function useTarotReader(): UseTarotReaderReturn {
             videoTracks: stream.getVideoTracks().length,
           });
           
+          // ストリームをrefに保存
+          cameraStreamRef.current = stream;
+          
+          // video要素が存在する場合は即座に設定
           if (videoRef.current) {
             videoRef.current.srcObject = stream;
-            
-            // デバッグ情報を更新（成功）
-            setDebugInfo((prev) => ({
-              ...prev,
-              hasStream: true,
-              cameraPermission: '許可済み',
-              streamError: null,
-            }));
+            console.log('[カメラ] video要素にストリームを設定しました');
+          } else {
+            console.warn('[カメラ] video要素がまだ存在しません。後で設定します。');
           }
+          
+          // デバッグ情報を更新（成功）
+          setDebugInfo((prev) => ({
+            ...prev,
+            hasStream: true,
+            cameraPermission: '許可済み',
+            streamError: null,
+          }));
         })
         .catch((error) => {
           console.error('[カメラ] アクセスエラー:', error);
@@ -802,6 +818,10 @@ export function useTarotReader(): UseTarotReaderReturn {
         });
     } else if (hasSavedImage) {
       // 画像保存時はカメラストリームを停止
+      if (cameraStreamRef.current) {
+        cameraStreamRef.current.getTracks().forEach((track) => track.stop());
+        cameraStreamRef.current = null;
+      }
       setDebugInfo((prev) => ({
         ...prev,
         cameraPermission: '停止中（画像保存済み）',
@@ -809,12 +829,20 @@ export function useTarotReader(): UseTarotReaderReturn {
     }
 
     return () => {
+      if (cameraStreamRef.current) {
+        cameraStreamRef.current.getTracks().forEach((track) => track.stop());
+        cameraStreamRef.current = null;
+      }
       if (videoRef.current && videoRef.current.srcObject) {
         const stream = videoRef.current.srcObject as MediaStream;
         stream.getTracks().forEach((track) => track.stop());
+        videoRef.current.srcObject = null;
       }
     };
   }, [hasSavedImage]);
+
+  // video要素が設定されたら、保持しているストリームを設定（描画ループ内でチェック）
+  // 描画ループ内でvideo要素とストリームの状態を確認して設定
 
   // 画像マッチング処理
   const performMatching = useCallback(async (imageElement: HTMLImageElement | HTMLCanvasElement) => {
