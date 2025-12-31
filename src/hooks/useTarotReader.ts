@@ -24,6 +24,10 @@ interface DebugInfo {
   canvasWidth: number;
   canvasHeight: number;
   isVideoPlaying: boolean;
+  hasVideoElement: boolean;
+  hasStream: boolean;
+  streamError: string | null;
+  cameraPermission: string | null;
 }
 
 interface UseTarotReaderReturn {
@@ -172,6 +176,10 @@ export function useTarotReader(): UseTarotReaderReturn {
     canvasWidth: 0,
     canvasHeight: 0,
     isVideoPlaying: false,
+    hasVideoElement: false,
+    hasStream: false,
+    streamError: null,
+    cameraPermission: null,
   });
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -367,14 +375,18 @@ export function useTarotReader(): UseTarotReaderReturn {
 
     // デバッグ情報を更新
     const video = videoRef.current;
-    setDebugInfo({
+    const stream = video?.srcObject as MediaStream | null;
+    setDebugInfo((prev) => ({
+      ...prev,
       videoReadyState: video?.readyState ?? null,
       videoWidth: video?.videoWidth ?? 0,
       videoHeight: video?.videoHeight ?? 0,
       canvasWidth: canvas.width,
       canvasHeight: canvas.height,
       isVideoPlaying: !!(video && !video.paused && !video.ended && video.readyState > 2),
-    });
+      hasVideoElement: !!video,
+      hasStream: !!stream,
+    }));
 
     // OpenCVが利用可能か確認
     if (!window.cv || !window.cv.Canny || !window.cv.findContours) {
@@ -742,16 +754,58 @@ export function useTarotReader(): UseTarotReaderReturn {
   // カメラストリームの開始
   useEffect(() => {
     if (!hasSavedImage && videoRef.current) {
+      // デバッグ情報を更新（カメラアクセス試行中）
+      setDebugInfo((prev) => ({
+        ...prev,
+        cameraPermission: 'アクセス試行中...',
+        streamError: null,
+      }));
+
       navigator.mediaDevices
         .getUserMedia({ video: { facingMode: 'environment' } })
         .then((stream) => {
+          console.log('[カメラ] ストリーム取得成功', {
+            tracks: stream.getTracks().length,
+            videoTracks: stream.getVideoTracks().length,
+          });
+          
           if (videoRef.current) {
             videoRef.current.srcObject = stream;
+            
+            // デバッグ情報を更新（成功）
+            setDebugInfo((prev) => ({
+              ...prev,
+              hasStream: true,
+              cameraPermission: '許可済み',
+              streamError: null,
+            }));
           }
         })
         .catch((error) => {
-          console.error('カメラアクセスエラー:', error);
+          console.error('[カメラ] アクセスエラー:', error);
+          
+          // デバッグ情報を更新（エラー）
+          const errorMessage = error.name === 'NotAllowedError' 
+            ? 'カメラアクセスが拒否されました'
+            : error.name === 'NotFoundError'
+            ? 'カメラが見つかりません'
+            : error.name === 'NotReadableError'
+            ? 'カメラが使用中です'
+            : error.message || '不明なエラー';
+          
+          setDebugInfo((prev) => ({
+            ...prev,
+            hasStream: false,
+            cameraPermission: 'エラー',
+            streamError: errorMessage,
+          }));
         });
+    } else if (hasSavedImage) {
+      // 画像保存時はカメラストリームを停止
+      setDebugInfo((prev) => ({
+        ...prev,
+        cameraPermission: '停止中（画像保存済み）',
+      }));
     }
 
     return () => {
