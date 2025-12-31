@@ -67,6 +67,10 @@ declare global {
       THRESH_TOZERO: number;
       THRESH_TOZERO_INV: number;
       THRESH_OTSU: number;
+      matFromArray: (rows: number, cols: number, type: number, array: number[]) => any;
+      CV_32FC2: number;
+      getPerspectiveTransform: (src: any, dst: any) => any;
+      warpPerspective: (src: any, dst: any, M: any, dsize: any, flags?: number, borderMode?: number, borderValue?: any) => void;
     };
   }
   

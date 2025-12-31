@@ -3,8 +3,9 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "next dev",
-    "build": "next build",
+    "generate-master-list": "node scripts/generate-master-list.mjs",
+    "dev": "npm run generate-master-list && next dev",
+    "build": "npm run generate-master-list && next build",
     "start": "next start",
     "lint": "eslint"
   },

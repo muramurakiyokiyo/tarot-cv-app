@@ -27,7 +27,7 @@ export function CameraView() {
       )}
       {isCvLoaded && !isMasterReady && (
         <div className="absolute top-4 left-4 bg-orange-500 text-white px-4 py-2 rounded z-10">
-          マスターデータを準備中...
+          Preparing Database...
         </div>
       )}
       {isAnalyzing && (

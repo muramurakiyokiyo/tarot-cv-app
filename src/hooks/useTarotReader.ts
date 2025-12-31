@@ -2,9 +2,16 @@
 
 import { useState, useEffect, useRef, useCallback } from 'react';
 
-interface MasterData {
+// 1つのマスター画像の特徴量データ
+interface MasterImageData {
   keypoints: any;
   descriptors: any;
+}
+
+// 1つのカードの全マスター画像の特徴量データ（配列）
+interface MasterData {
+  images: MasterImageData[];
+  displayName: string;
 }
 
 interface Candidate {
@@ -35,31 +42,31 @@ interface UseTarotReaderReturn {
 
 const STORAGE_KEY = 'tarot-captured-image';
 
-// 大アルカナ22枚のIDリスト
-const MAJOR_ARCANA_IDS = [
-  'FOOL',
-  'MAGICIAN',
-  'HIGHPRIESTESS',
-  'EMPRESS',
-  'EMPEROR',
-  'HIEROPHANT',
-  'LOVERS',
-  'CHARIOT',
-  'STRENGTH',
-  'HERMIT',
-  'WHEELOFFORTUNE',
-  'JUSTICE',
-  'HANGEDMAN',
-  'DEATH',
-  'TEMPERANCE',
-  'DEVIL',
-  'TOWER',
-  'STAR',
-  'MOON',
-  'SUN',
-  'JUDGEMENT',
-  'WORLD',
-] as const;
+// 大アルカナ22枚のIDリスト（master-list.jsonから動的に読み込むため、ここでは使用しない）
+// const MAJOR_ARCANA_IDS = [
+//   'FOOL',
+//   'MAGICIAN',
+//   'HIGHPRIESTESS',
+//   'EMPRESS',
+//   'EMPEROR',
+//   'HIEROPHANT',
+//   'LOVERS',
+//   'CHARIOT',
+//   'STRENGTH',
+//   'HERMIT',
+//   'WHEELOFFORTUNE',
+//   'JUSTICE',
+//   'HANGEDMAN',
+//   'DEATH',
+//   'TEMPERANCE',
+//   'DEVIL',
+//   'TOWER',
+//   'STAR',
+//   'MOON',
+//   'SUN',
+//   'JUDGEMENT',
+//   'WORLD',
+// ] as const;
 
 // カードIDから表示名へのマッピング
 const CARD_DISPLAY_NAMES: Record<string, string> = {
@@ -245,11 +252,12 @@ export function useTarotReader(): UseTarotReaderReturn {
     }
   }, []);
 
-  // マスターデータのロードとORB特徴量計算（動的ロード）
+  // マスターデータのロードとORB特徴量計算（フォルダベースの複数画像ロード）
   useEffect(() => {
     if (!isCvLoaded) return;
 
-    const loadMasterData = async (cardId: string, imagePath: string): Promise<boolean> => {
+    // 1つのマスター画像をロードして特徴量を計算
+    const loadMasterImage = async (cardName: string, imagePath: string): Promise<MasterImageData | null> => {
       return new Promise((resolve) => {
         const img = new Image();
         img.onload = () => {
@@ -264,50 +272,87 @@ export function useTarotReader(): UseTarotReaderReturn {
 
             orb.detectAndCompute(gray, new window.cv.Mat(), keypoints, descriptors);
 
-            const cardName = CARD_DISPLAY_NAMES[cardId] || cardId;
-            masterDataMapRef.current.set(cardId, {
-              keypoints,
-              descriptors,
-            });
-
-            console.log(`✓ ${cardName} (${cardId}): 特徴点 ${keypoints.size()} 個、記述子サイズ ${descriptors.rows}x${descriptors.cols}`);
-
             // メモリ解放（keypointsとdescriptorsは保持するため削除しない）
             src.delete();
             gray.delete();
             orb.delete();
 
-            resolve(true);
+            resolve({
+              keypoints,
+              descriptors,
+            });
           } catch (error) {
-            console.error(`✗ ${cardId}の特徴量計算エラー:`, error);
-            resolve(false);
+            console.error(`✗ ${cardName}の画像(${imagePath})の特徴量計算エラー:`, error);
+            resolve(null);
           }
         };
         img.onerror = () => {
-          console.warn(`✗ ${cardId}の画像が見つかりません: ${imagePath} (スキップします)`);
-          resolve(false);
+          console.warn(`✗ ${cardName}の画像が見つかりません: ${imagePath} (スキップします)`);
+          resolve(null);
         };
         img.src = imagePath;
       });
     };
 
+    // 1つのカードの全画像をロード
+    const loadCardImages = async (cardName: string, imageFiles: string[]): Promise<MasterImageData[]> => {
+      const loadPromises = imageFiles.map((imageFile) =>
+        loadMasterImage(cardName, `/master/${cardName}/${imageFile}`)
+      );
+      const results = await Promise.all(loadPromises);
+      return results.filter((r): r is MasterImageData => r !== null);
+    };
+
     const initializeMasterData = async () => {
       console.log('マスターデータの初期化を開始...');
-      const loadPromises = MAJOR_ARCANA_IDS.map((cardId) =>
-        loadMasterData(cardId, `/master/${cardId}.jpg`)
-      );
+      console.log('Preparing Database...');
 
-      const results = await Promise.all(loadPromises);
-      const successCount = results.filter((r) => r).length;
-      const totalCount = MAJOR_ARCANA_IDS.length;
+      try {
+        // master-list.json を読み込む
+        const response = await fetch('/lib/master-list.json');
+        if (!response.ok) {
+          throw new Error(`master-list.json の読み込みに失敗しました: ${response.status}`);
+        }
+        const masterList: Record<string, string[]> = await response.json();
 
-      console.log(`マスターデータの初期化が完了しました: ${successCount}/${totalCount} 枚のカードをロード`);
-      
-      if (successCount > 0) {
-        setIsMasterReady(true);
-        console.log(`利用可能なカード: ${Array.from(masterDataMapRef.current.keys()).join(', ')}`);
-      } else {
-        console.error('マスターデータが1枚もロードできませんでした');
+        console.log(`マスターリストを読み込みました: ${Object.keys(masterList).length} 枚のカード`);
+
+        // 各カードの全画像をロード
+        const cardNames = Object.keys(masterList);
+        const cardLoadPromises = cardNames.map(async (cardName) => {
+          const imageFiles = masterList[cardName];
+          const imageDataArray = await loadCardImages(cardName, imageFiles);
+
+          if (imageDataArray.length > 0) {
+            const displayName = CARD_DISPLAY_NAMES[cardName] || cardName;
+            masterDataMapRef.current.set(cardName, {
+              images: imageDataArray,
+              displayName,
+            });
+
+            const totalKeypoints = imageDataArray.reduce((sum, img) => sum + img.keypoints.size(), 0);
+            console.log(`✓ ${displayName} (${cardName}): ${imageDataArray.length} 枚の画像、合計 ${totalKeypoints} 個の特徴点`);
+            return true;
+          } else {
+            console.warn(`⚠ ${cardName}: 有効な画像が1枚も見つかりませんでした`);
+            return false;
+          }
+        });
+
+        const results = await Promise.all(cardLoadPromises);
+        const successCount = results.filter((r) => r).length;
+        const totalCount = cardNames.length;
+
+        console.log(`マスターデータの初期化が完了しました: ${successCount}/${totalCount} 枚のカードをロード`);
+        
+        if (successCount > 0) {
+          setIsMasterReady(true);
+          console.log(`利用可能なカード: ${Array.from(masterDataMapRef.current.keys()).join(', ')}`);
+        } else {
+          console.error('マスターデータが1枚もロードできませんでした');
+        }
+      } catch (error) {
+        console.error('マスターデータの初期化エラー:', error);
       }
     };
 
@@ -795,7 +840,7 @@ export function useTarotReader(): UseTarotReaderReturn {
     };
   }, [hasSavedImage]);
 
-  // 画像マッチング処理
+  // 画像マッチング処理（フォルダ内全画像と比較し、最高スコアを採用）
   const performMatching = useCallback(async (imageElement: HTMLImageElement | HTMLCanvasElement) => {
     if (!isCvLoaded || masterDataMapRef.current.size === 0) {
       console.warn('OpenCVがロードされていないか、マスターデータが初期化されていません');
@@ -804,102 +849,202 @@ export function useTarotReader(): UseTarotReaderReturn {
 
     setIsAnalyzing(true);
 
+    let src: any = null;
+    let gray: any = null;
+    let orb: any = null;
+    let keypoints: any = null;
+    let descriptors: any = null;
+    let matcher: any = null;
+
     try {
       // 撮影画像の特徴量を抽出
-      const src = window.cv.imread(imageElement);
-      const gray = new window.cv.Mat();
+      src = window.cv.imread(imageElement);
+      gray = new window.cv.Mat();
       window.cv.cvtColor(src, gray, window.cv.COLOR_RGBA2GRAY);
 
-      const orb = createORB(500);
-      const keypoints = new window.cv.KeyPointVector();
-      const descriptors = new window.cv.Mat();
+      orb = createORB(500);
+      keypoints = new window.cv.KeyPointVector();
+      descriptors = new window.cv.Mat();
 
       orb.detectAndCompute(gray, new window.cv.Mat(), keypoints, descriptors);
 
       // BFMatcherでマッチング
-      const matcher = createBFMatcher(window.cv.NORM_HAMMING, false);
+      matcher = createBFMatcher(window.cv.NORM_HAMMING, false);
       const matchResults: Map<string, number> = new Map();
 
       // すべてのマスターデータと比較
-      for (const [cardId, master] of masterDataMapRef.current.entries()) {
-        const matches = new window.cv.DMatchVector();
-        matcher.match(descriptors, master.descriptors, matches);
+      for (const [cardName, master] of masterDataMapRef.current.entries()) {
+        let maxScore = 0; // このカードフォルダ内での最高スコア
 
-        // Good Matchesを計算（距離が小さいものを厳格にフィルタリング）
-        const goodMatches: any[] = [];
-        const matchCount = matches.size();
-        
-        // 距離の最小値を計算（より厳格なフィルタリングのため）
-        let minDistance = Infinity;
-        for (let i = 0; i < matchCount; i++) {
-          const match = matches.get(i);
-          if (match.distance < minDistance) {
-            minDistance = match.distance;
+        // このカードの全マスター画像と比較
+        for (let imgIndex = 0; imgIndex < master.images.length; imgIndex++) {
+          const masterImage = master.images[imgIndex];
+          const matches = new window.cv.DMatchVector();
+          matcher.match(descriptors, masterImage.descriptors, matches);
+
+          // Good Matchesを計算（距離が小さいものを厳格にフィルタリング）
+          const goodMatches: any[] = [];
+          const matchCount = matches.size();
+          
+          // 距離の最小値を計算（より厳格なフィルタリングのため）
+          let minDistance = Infinity;
+          for (let i = 0; i < matchCount; i++) {
+            const match = matches.get(i);
+            if (match.distance < minDistance) {
+              minDistance = match.distance;
+            }
           }
+
+          // Good Matches: 最小距離の2倍以下（Lowe's ratio testの簡易版）
+          const threshold = Math.max(30, minDistance * 2);
+          for (let i = 0; i < matchCount; i++) {
+            const match = matches.get(i);
+            if (match.distance < threshold) {
+              goodMatches.push(match);
+            }
+          }
+
+          const goodMatchCount = goodMatches.length;
+          
+          // この画像とのスコアが最高スコアを上回る場合は更新
+          if (goodMatchCount > maxScore) {
+            maxScore = goodMatchCount;
+          }
+
+          matches.delete();
         }
 
-        // Good Matches: 最小距離の2倍以下（Lowe's ratio testの簡易版）
-        const threshold = Math.max(30, minDistance * 2);
-        for (let i = 0; i < matchCount; i++) {
-          const match = matches.get(i);
-          if (match.distance < threshold) {
-            goodMatches.push(match);
-          }
-        }
-
-        const goodMatchCount = goodMatches.length;
-        const cardName = CARD_DISPLAY_NAMES[cardId] || cardId;
-        matchResults.set(cardId, goodMatchCount);
-        
-        console.log(`${cardName} (${cardId}): 総マッチ数 ${matchCount}, Good Matches ${goodMatchCount} (閾値: ${threshold.toFixed(1)})`);
-
-        matches.delete();
+        // このカードの最終スコアとして最高スコアを採用
+        matchResults.set(cardName, maxScore);
+        console.log(`${master.displayName} (${cardName}): 最高スコア ${maxScore} matches (${master.images.length} 枚の画像と比較)`);
       }
 
       // スコアが高い順にソートしてCandidate配列に変換
       const sortedCandidates: Candidate[] = Array.from(matchResults.entries())
         .sort(([, a], [, b]) => b - a)
-        .map(([cardId, matchCount]) => ({
-          cardName: CARD_DISPLAY_NAMES[cardId] || cardId,
-          matchCount,
-        }));
+        .map(([cardName, matchCount]) => {
+          const master = masterDataMapRef.current.get(cardName);
+          return {
+            cardName: master?.displayName || cardName,
+            matchCount,
+          };
+        });
 
-      console.log('マッチング結果:', Array.from(matchResults.entries()).map(([id, count]) => `${CARD_DISPLAY_NAMES[id] || id}: ${count}`).join(', '));
+      console.log('マッチング結果:', Array.from(matchResults.entries()).map(([name, count]) => {
+        const master = masterDataMapRef.current.get(name);
+        return `${master?.displayName || name}: ${count}`;
+      }).join(', '));
       console.log('候補順位:', sortedCandidates.map(c => `${c.cardName}: ${c.matchCount} matches`));
 
       setCandidates(sortedCandidates);
-
-      // メモリ解放
-      src.delete();
-      gray.delete();
-      orb.delete();
-      keypoints.delete();
-      descriptors.delete();
-      matcher.delete();
     } catch (error) {
       console.error('マッチング処理エラー:', error);
       setCandidates([]);
     } finally {
+      // メモリ解放（エラーが発生しても確実に解放）
+      if (src) src.delete();
+      if (gray) gray.delete();
+      if (orb) orb.delete();
+      if (keypoints) keypoints.delete();
+      if (descriptors) descriptors.delete();
+      if (matcher) matcher.delete();
       setIsAnalyzing(false);
     }
   }, [isCvLoaded, createORB, createBFMatcher]);
 
-  // 画像を撮影
+  // 画像を撮影（射影変換による高精度解析）
   const captureImage = useCallback(() => {
     if (!canvasRef.current || !videoRef.current || !isCvLoaded) return;
 
     const video = videoRef.current;
+    const canvas = canvasRef.current;
     let imageData: string;
 
-    // 最後に検出された矩形領域の画像がある場合はそれを使用
-    if (detectedRectImage) {
-      imageData = detectedRectImage;
-      console.log('[撮影] 保存済みの矩形領域画像を使用します');
+    // 検出された矩形がある場合は射影変換を実行
+    if (detectedRect && detectedRect.points.length === 4) {
+      let src: any = null;
+      let srcPointsMat: any = null;
+      let dstPointsMat: any = null;
+      let transformMat: any = null;
+      let dst: any = null;
+
+      try {
+        console.log('[撮影] 射影変換による高精度解析を実行します');
+
+        // ビデオフレームをCanvasに描画
+        const tempCanvas = document.createElement('canvas');
+        tempCanvas.width = video.videoWidth;
+        tempCanvas.height = video.videoHeight;
+        const tempCtx = tempCanvas.getContext('2d');
+        if (!tempCtx) {
+          console.error('[撮影] Canvasコンテキストの取得に失敗しました');
+          return;
+        }
+        tempCtx.drawImage(video, 0, 0, tempCanvas.width, tempCanvas.height);
+
+        // OpenCVで画像を読み込む
+        src = window.cv.imread(tempCanvas);
+        
+        // 射影変換のための4隅の座標
+        const srcPoints = detectedRect.points;
+        srcPointsMat = window.cv.matFromArray(4, 1, window.cv.CV_32FC2, [
+          srcPoints[0].x, srcPoints[0].y,
+          srcPoints[1].x, srcPoints[1].y,
+          srcPoints[2].x, srcPoints[2].y,
+          srcPoints[3].x, srcPoints[3].y,
+        ]);
+
+        // 補正後のサイズ（400x600px）
+        const dstWidth = 400;
+        const dstHeight = 600;
+        dstPointsMat = window.cv.matFromArray(4, 1, window.cv.CV_32FC2, [
+          0, 0,
+          dstWidth, 0,
+          dstWidth, dstHeight,
+          0, dstHeight,
+        ]);
+
+        // 射影変換行列を計算
+        transformMat = window.cv.getPerspectiveTransform(srcPointsMat, dstPointsMat);
+
+        // 射影変換を実行
+        dst = new window.cv.Mat();
+        window.cv.warpPerspective(src, dst, transformMat, new window.cv.Size(dstWidth, dstHeight));
+
+        // 補正済み画像をCanvasに描画してDataURLに変換
+        const correctedCanvas = document.createElement('canvas');
+        correctedCanvas.width = dstWidth;
+        correctedCanvas.height = dstHeight;
+        const correctedCtx = correctedCanvas.getContext('2d');
+        if (correctedCtx) {
+          const imgData = new ImageData(
+            new Uint8ClampedArray(dst.data),
+            dst.cols,
+            dst.rows
+          );
+          correctedCtx.putImageData(imgData, 0, 0);
+          imageData = correctedCanvas.toDataURL('image/png');
+          console.log('[撮影] 射影変換完了: 補正済み画像サイズ', dstWidth, 'x', dstHeight);
+        } else {
+          throw new Error('補正済みCanvasのコンテキスト取得に失敗');
+        }
+      } catch (error) {
+        console.error('[撮影] 射影変換エラー:', error);
+        // エラー時は通常の方法で撮影
+        imageData = canvas.toDataURL('image/png');
+        console.log('[撮影] 通常の方法で撮影します');
+      } finally {
+        // メモリ解放（エラーが発生しても確実に解放）
+        if (src) src.delete();
+        if (srcPointsMat) srcPointsMat.delete();
+        if (dstPointsMat) dstPointsMat.delete();
+        if (transformMat) transformMat.delete();
+        if (dst) dst.delete();
+      }
     } else {
-      // 矩形領域画像がない場合は、現在のCanvas全体を使用
-      const canvas = canvasRef.current;
+      // 矩形が検出されていない場合は、現在のCanvas全体を使用
       imageData = canvas.toDataURL('image/png');
-      console.log('[撮影] 矩形領域画像がないため、全体画像を使用します');
+      console.log('[撮影] 矩形が検出されていないため、全体画像を使用します');
     }
     
     // localStorageに保存
@@ -921,7 +1066,7 @@ export function useTarotReader(): UseTarotReaderReturn {
       performMatching(img);
     };
     img.src = imageData;
-  }, [isCvLoaded, performMatching, detectedRectImage]);
+  }, [isCvLoaded, performMatching, detectedRect]);
 
   // 画像を削除
   const deleteImage = useCallback(() => {
@@ -944,19 +1089,23 @@ export function useTarotReader(): UseTarotReaderReturn {
     return () => {
       // ページを離れる際や再読み込み時に、Map内のcv.Matオブジェクトをすべて削除
       console.log('マスターデータのメモリを解放中...');
-      for (const [cardId, masterData] of masterDataMapRef.current.entries()) {
+      const masterDataMap = masterDataMapRef.current;
+      for (const [cardId, masterData] of masterDataMap.entries()) {
         try {
-          if (masterData.keypoints) {
-            masterData.keypoints.delete();
-          }
-          if (masterData.descriptors) {
-            masterData.descriptors.delete();
+          // 各カードの全画像の特徴量を解放
+          for (const imageData of masterData.images) {
+            if (imageData.keypoints) {
+              imageData.keypoints.delete();
+            }
+            if (imageData.descriptors) {
+              imageData.descriptors.delete();
+            }
           }
         } catch (error) {
           console.warn(`${cardId}のメモリ解放エラー:`, error);
         }
       }
-      masterDataMapRef.current.clear();
+      masterDataMap.clear();
       console.log('マスターデータのメモリ解放が完了しました');
     };
   }, []);
