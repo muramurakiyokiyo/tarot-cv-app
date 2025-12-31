@@ -164,6 +164,8 @@ export function useTarotReader(): UseTarotReaderReturn {
   const masterDataMapRef = useRef<Map<string, MasterData>>(new Map());
   // 矩形検出の安定性を追跡（自動撮影の準備）
   const rectDetectionCountRef = useRef<number>(0);
+  // カメラストリームを保持
+  const cameraStreamRef = useRef<MediaStream | null>(null);
 
   // OpenCV.jsのロード
   useEffect(() => {
@@ -371,6 +373,19 @@ export function useTarotReader(): UseTarotReaderReturn {
     } else if (videoRef.current && videoRef.current.readyState === 4) {
       // ライブプレビュー（フィルタ適用）
       const video = videoRef.current;
+      
+      // video要素が設定されていて、ストリームが保持されている場合は設定
+      if (cameraStreamRef.current && !video.srcObject) {
+        video.srcObject = cameraStreamRef.current;
+      }
+      
+      // ストリームが設定されているが再生されていない場合は再生を開始
+      if (video.srcObject && video.paused && video.readyState >= 2) {
+        video.play().catch((error) => {
+          console.warn('[カメラ] 再生エラー:', error);
+        });
+      }
+      
       canvas.width = video.videoWidth;
       canvas.height = video.videoHeight;
 
@@ -712,10 +727,11 @@ export function useTarotReader(): UseTarotReaderReturn {
 
   // カメラストリームの開始
   useEffect(() => {
-    if (!hasSavedImage && videoRef.current) {
+    if (!hasSavedImage) {
       navigator.mediaDevices
         .getUserMedia({ video: { facingMode: 'environment' } })
         .then((stream) => {
+          cameraStreamRef.current = stream;
           if (videoRef.current) {
             videoRef.current.srcObject = stream;
           }
@@ -723,12 +739,23 @@ export function useTarotReader(): UseTarotReaderReturn {
         .catch((error) => {
           console.error('カメラアクセスエラー:', error);
         });
+    } else {
+      // 画像保存時はストリームを停止
+      if (cameraStreamRef.current) {
+        cameraStreamRef.current.getTracks().forEach((track) => track.stop());
+        cameraStreamRef.current = null;
+      }
     }
 
     return () => {
+      if (cameraStreamRef.current) {
+        cameraStreamRef.current.getTracks().forEach((track) => track.stop());
+        cameraStreamRef.current = null;
+      }
       if (videoRef.current && videoRef.current.srcObject) {
         const stream = videoRef.current.srcObject as MediaStream;
         stream.getTracks().forEach((track) => track.stop());
+        videoRef.current.srcObject = null;
       }
     };
   }, [hasSavedImage]);
