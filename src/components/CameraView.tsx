@@ -125,6 +125,12 @@ export function CameraView() {
           <div>Video Size: {debugInfo.videoWidth}x{debugInfo.videoHeight}</div>
           <div>Canvas Size: {debugInfo.canvasWidth}x{debugInfo.canvasHeight}</div>
           <div>Video Playing: {debugInfo.isVideoPlaying ? '✓' : '✗'}</div>
+          <div className="text-[10px] text-gray-400">
+            paused: {debugInfo.videoPaused !== null ? (debugInfo.videoPaused ? 'true' : 'false') : 'N/A'}
+          </div>
+          <div className="text-[10px] text-gray-400">
+            srcObject: {debugInfo.hasSrcObject ? '存在' : 'null'}
+          </div>
         </div>
         <div className="mt-2 border-t border-gray-600 pt-2 space-y-1">
           <div className="text-yellow-300">カメラ状態:</div>

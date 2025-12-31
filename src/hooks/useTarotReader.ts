@@ -28,6 +28,8 @@ interface DebugInfo {
   hasStream: boolean;
   streamError: string | null;
   cameraPermission: string | null;
+  videoPaused: boolean | null;
+  hasSrcObject: boolean;
 }
 
 interface UseTarotReaderReturn {
@@ -180,6 +182,8 @@ export function useTarotReader(): UseTarotReaderReturn {
     hasStream: false,
     streamError: null,
     cameraPermission: null,
+    videoPaused: null,
+    hasSrcObject: false,
   });
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -379,8 +383,15 @@ export function useTarotReader(): UseTarotReaderReturn {
       videoRef.current.srcObject = cameraStreamRef.current;
     }
 
-    // デバッグ情報を更新
+    // video要素が存在し、ストリームが設定されているが再生されていない場合は再生を開始
     const video = videoRef.current;
+    if (video && video.srcObject && video.paused && video.readyState >= 2) {
+      video.play().catch((error) => {
+        console.warn('[カメラ] 再生エラー:', error);
+      });
+    }
+
+    // デバッグ情報を更新
     const stream = video?.srcObject as MediaStream | null;
     setDebugInfo((prev) => ({
       ...prev,
@@ -392,6 +403,8 @@ export function useTarotReader(): UseTarotReaderReturn {
       isVideoPlaying: !!(video && !video.paused && !video.ended && video.readyState > 2),
       hasVideoElement: !!video,
       hasStream: !!(stream || cameraStreamRef.current),
+      videoPaused: video?.paused ?? null,
+      hasSrcObject: !!video?.srcObject,
     }));
 
     // OpenCVが利用可能か確認
