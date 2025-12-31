@@ -20,10 +20,12 @@ declare global {
         new (maxFeatures?: number): any;
         create: (maxFeatures?: number) => any;
       };
+      ORB_create: (maxFeatures?: number) => any;
       BFMatcher: {
         new (normType?: number, crossCheck?: boolean): any;
         create: (normType?: number, crossCheck?: boolean) => any;
       };
+      BFMatcher_create: (normType?: number, crossCheck?: boolean) => any;
       NORM_HAMMING: number;
       NORM_HAMMING2: number;
       KeyPointVector: {

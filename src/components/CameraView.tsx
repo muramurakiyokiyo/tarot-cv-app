@@ -72,16 +72,21 @@ export function CameraView() {
             解析結果（上位3件）
           </h2>
           <div className="flex flex-col gap-2">
-            {candidates.slice(0, 3).map((card, index) => (
+            {candidates.slice(0, 3).map((candidate, index) => (
               <div
-                key={`${card}-${index}`}
+                key={`${candidate.cardName}-${index}`}
                 className="flex items-center justify-between bg-gray-800 rounded-lg p-4 hover:bg-gray-700 transition-colors"
               >
-                <span className="text-white font-medium">{card}</span>
+                <div className="flex items-center gap-3">
+                  <span className="text-white font-medium">{candidate.cardName}</span>
+                  <span className="text-blue-400 text-sm font-semibold">
+                    {candidate.matchCount} matches
+                  </span>
+                </div>
                 <button
-                  onClick={() => addToBlacklist(card)}
+                  onClick={() => addToBlacklist(candidate.cardName)}
                   className="ml-4 w-8 h-8 flex items-center justify-center bg-red-600 text-white rounded-full hover:bg-red-700 transition-colors"
-                  aria-label={`${card}を除外`}
+                  aria-label={`${candidate.cardName}を除外`}
                 >
                   ×
                 </button>

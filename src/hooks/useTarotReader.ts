@@ -7,11 +7,16 @@ interface MasterData {
   descriptors: any;
 }
 
+interface Candidate {
+  cardName: string;
+  matchCount: number;
+}
+
 interface UseTarotReaderReturn {
   isCvLoaded: boolean;
   isAnalyzing: boolean;
   hasSavedImage: boolean;
-  candidates: string[];
+  candidates: Candidate[];
   blacklist: string[];
   videoRef: React.RefObject<HTMLVideoElement>;
   canvasRef: React.RefObject<HTMLCanvasElement>;
@@ -26,7 +31,7 @@ export function useTarotReader(): UseTarotReaderReturn {
   const [isCvLoaded, setIsCvLoaded] = useState(false);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [hasSavedImage, setHasSavedImage] = useState(false);
-  const [candidates, setCandidates] = useState<string[]>([]);
+  const [candidates, setCandidates] = useState<Candidate[]>([]);
   const [blacklist, setBlacklist] = useState<string[]>([]);
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -65,6 +70,34 @@ export function useTarotReader(): UseTarotReaderReturn {
     };
   }, []);
 
+  // ORB作成ヘルパー関数
+  const createORB = useCallback((maxFeatures: number = 500) => {
+    const cv = window.cv;
+    if (cv.ORB_create) {
+      return cv.ORB_create(maxFeatures);
+    } else if (cv.ORB && typeof cv.ORB === 'function') {
+      return new cv.ORB(maxFeatures);
+    } else if (cv.ORB && cv.ORB.create) {
+      return cv.ORB.create(maxFeatures);
+    } else {
+      throw new Error('ORB is not available in this OpenCV.js build. Make sure features2d module is included.');
+    }
+  }, []);
+
+  // BFMatcher作成ヘルパー関数
+  const createBFMatcher = useCallback((normType: number, crossCheck: boolean = false) => {
+    const cv = window.cv;
+    if (cv.BFMatcher_create) {
+      return cv.BFMatcher_create(normType, crossCheck);
+    } else if (cv.BFMatcher && typeof cv.BFMatcher === 'function') {
+      return new cv.BFMatcher(normType, crossCheck);
+    } else if (cv.BFMatcher && cv.BFMatcher.create) {
+      return cv.BFMatcher.create(normType, crossCheck);
+    } else {
+      throw new Error('BFMatcher is not available in this OpenCV.js build. Make sure features2d module is included.');
+    }
+  }, []);
+
   // マスターデータのロードとORB特徴量計算
   useEffect(() => {
     if (!isCvLoaded) return;
@@ -78,7 +111,7 @@ export function useTarotReader(): UseTarotReaderReturn {
             const gray = new window.cv.Mat();
             window.cv.cvtColor(src, gray, window.cv.COLOR_RGBA2GRAY);
 
-            const orb = window.cv.ORB.create(500);
+            const orb = createORB(500);
             const keypoints = new window.cv.KeyPointVector();
             const descriptors = new window.cv.Mat();
 
@@ -121,7 +154,7 @@ export function useTarotReader(): UseTarotReaderReturn {
     };
 
     initializeMasterData();
-  }, [isCvLoaded]);
+  }, [isCvLoaded, createORB]);
 
   // 保存済み画像の復元
   useEffect(() => {
@@ -258,14 +291,14 @@ export function useTarotReader(): UseTarotReaderReturn {
       const gray = new window.cv.Mat();
       window.cv.cvtColor(src, gray, window.cv.COLOR_RGBA2GRAY);
 
-      const orb = window.cv.ORB.create(500);
+      const orb = createORB(500);
       const keypoints = new window.cv.KeyPointVector();
       const descriptors = new window.cv.Mat();
 
       orb.detectAndCompute(gray, new window.cv.Mat(), keypoints, descriptors);
 
       // BFMatcherでマッチング
-      const matcher = window.cv.BFMatcher.create(window.cv.NORM_HAMMING, false);
+      const matcher = createBFMatcher(window.cv.NORM_HAMMING, false);
       const matchResults: Record<string, number> = {};
 
       for (const [cardName, master] of Object.entries(masterDataRef.current)) {
@@ -291,15 +324,18 @@ export function useTarotReader(): UseTarotReaderReturn {
         matches.delete();
       }
 
-      // スコアが高い順にソート
-      const sortedCards = Object.entries(matchResults)
+      // スコアが高い順にソートしてCandidate配列に変換
+      const sortedCandidates: Candidate[] = Object.entries(matchResults)
         .sort(([, a], [, b]) => b - a)
-        .map(([cardName]) => cardName);
+        .map(([cardName, matchCount]) => ({
+          cardName,
+          matchCount,
+        }));
 
       console.log('マッチング結果:', matchResults);
-      console.log('候補順位:', sortedCards);
+      console.log('候補順位:', sortedCandidates.map(c => `${c.cardName}: ${c.matchCount} matches`));
 
-      setCandidates(sortedCards);
+      setCandidates(sortedCandidates);
 
       // メモリ解放
       src.delete();
@@ -314,7 +350,7 @@ export function useTarotReader(): UseTarotReaderReturn {
     } finally {
       setIsAnalyzing(false);
     }
-  }, [isCvLoaded]);
+  }, [isCvLoaded, createORB, createBFMatcher]);
 
   // 画像を撮影
   const captureImage = useCallback(() => {
@@ -363,7 +399,7 @@ export function useTarotReader(): UseTarotReaderReturn {
   }, []);
 
   // フィルタリングされた候補
-  const filteredCandidates = candidates.filter((c) => !blacklist.includes(c));
+  const filteredCandidates = candidates.filter((c) => !blacklist.includes(c.cardName));
 
   return {
     isCvLoaded,
