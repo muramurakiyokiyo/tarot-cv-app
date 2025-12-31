@@ -3,7 +3,7 @@ import { join } from 'path';
 import { writeFile } from 'fs/promises';
 
 const MASTER_DIR = join(process.cwd(), 'public', 'master');
-const OUTPUT_FILE = join(process.cwd(), 'src', 'lib', 'master-list.json');
+const OUTPUT_FILE = join(process.cwd(), 'public', 'lib', 'master-list.json');
 
 async function generateMasterList() {
   try {
@@ -55,8 +55,8 @@ async function generateMasterList() {
       }
     }
 
-    // src/lib ディレクトリが存在しない場合は作成
-    const libDir = join(process.cwd(), 'src', 'lib');
+    // public/lib ディレクトリが存在しない場合は作成
+    const libDir = join(process.cwd(), 'public', 'lib');
     try {
       await stat(libDir);
     } catch {
