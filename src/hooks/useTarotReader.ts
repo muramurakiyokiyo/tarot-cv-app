@@ -25,6 +25,7 @@ interface UseTarotReaderReturn {
   candidates: Candidate[];
   blacklist: string[];
   detectedRect: DetectedRect | null;
+  detectedRectImage: string | null;
   videoRef: React.RefObject<HTMLVideoElement | null>;
   canvasRef: React.RefObject<HTMLCanvasElement | null>;
   captureImage: () => void;
@@ -155,6 +156,7 @@ export function useTarotReader(): UseTarotReaderReturn {
   const [candidates, setCandidates] = useState<Candidate[]>([]);
   const [blacklist, setBlacklist] = useState<string[]>([]);
   const [detectedRect, setDetectedRect] = useState<DetectedRect | null>(null);
+  const [detectedRectImage, setDetectedRectImage] = useState<string | null>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const animationFrameRef = useRef<number | null>(null);
@@ -636,7 +638,35 @@ export function useTarotReader(): UseTarotReaderReturn {
                 // 矩形検出の安定性を追跡
                 rectDetectionCountRef.current += 1;
                 
-                console.log(`[矩形検出成功] 頂点:`, points, `面積: ${maxArea.toFixed(0)}, 連続検出: ${rectDetectionCountRef.current}回`);
+                // 矩形領域の画像を切り出して保存
+                const xs = points.map(p => p.x);
+                const ys = points.map(p => p.y);
+                const minX = Math.max(0, Math.floor(Math.min(...xs)));
+                const minY = Math.max(0, Math.floor(Math.min(...ys)));
+                const maxX = Math.min(canvas.width, Math.ceil(Math.max(...xs)));
+                const maxY = Math.min(canvas.height, Math.ceil(Math.max(...ys)));
+                const width = maxX - minX;
+                const height = maxY - minY;
+                
+                // 切り出し用の一時Canvasを作成
+                const cropCanvas = document.createElement('canvas');
+                cropCanvas.width = width;
+                cropCanvas.height = height;
+                const cropCtx = cropCanvas.getContext('2d');
+                
+                if (cropCtx && width > 0 && height > 0) {
+                  // 元のCanvasから領域を切り出し
+                  cropCtx.drawImage(
+                    canvas,
+                    minX, minY, width, height,
+                    0, 0, width, height
+                  );
+                  const croppedImageData = cropCanvas.toDataURL('image/png');
+                  setDetectedRectImage(croppedImageData);
+                  console.log(`[矩形検出成功] 頂点:`, points, `面積: ${maxArea.toFixed(0)}, 連続検出: ${rectDetectionCountRef.current}回, 切り出し画像: ${width}x${height}`);
+                } else {
+                  console.warn('[矩形検出] 領域画像の切り出しに失敗しました');
+                }
               } else {
                 console.log(`[矩形検出失敗] 形状チェックに失敗: 頂点数は4つだが、矩形の形状ではない`);
               }
@@ -683,6 +713,11 @@ export function useTarotReader(): UseTarotReaderReturn {
         
         // detectedRectステートを更新
         setDetectedRect(detectedRectData);
+        
+        // 矩形が検出されなかった場合は領域画像もクリア
+        if (!detectedRectData) {
+          setDetectedRectImage(null);
+        }
         
         // メモリ解放
         src.delete();
@@ -853,11 +888,19 @@ export function useTarotReader(): UseTarotReaderReturn {
   const captureImage = useCallback(() => {
     if (!canvasRef.current || !videoRef.current || !isCvLoaded) return;
 
-    const canvas = canvasRef.current;
     const video = videoRef.current;
+    let imageData: string;
 
-    // 現在のCanvasの内容（フィルタ適用済み）を取得
-    const imageData = canvas.toDataURL('image/png');
+    // 最後に検出された矩形領域の画像がある場合はそれを使用
+    if (detectedRectImage) {
+      imageData = detectedRectImage;
+      console.log('[撮影] 保存済みの矩形領域画像を使用します');
+    } else {
+      // 矩形領域画像がない場合は、現在のCanvas全体を使用
+      const canvas = canvasRef.current;
+      imageData = canvas.toDataURL('image/png');
+      console.log('[撮影] 矩形領域画像がないため、全体画像を使用します');
+    }
     
     // localStorageに保存
     localStorage.setItem(STORAGE_KEY, imageData);
@@ -878,7 +921,7 @@ export function useTarotReader(): UseTarotReaderReturn {
       performMatching(img);
     };
     img.src = imageData;
-  }, [isCvLoaded, performMatching]);
+  }, [isCvLoaded, performMatching, detectedRectImage]);
 
   // 画像を削除
   const deleteImage = useCallback(() => {
@@ -888,6 +931,7 @@ export function useTarotReader(): UseTarotReaderReturn {
     setHasSavedImage(false);
     setCandidates([]);
     setBlacklist([]);
+    setDetectedRectImage(null);
   }, []);
 
   // ブラックリストに追加
@@ -928,6 +972,7 @@ export function useTarotReader(): UseTarotReaderReturn {
     candidates: filteredCandidates,
     blacklist,
     detectedRect,
+    detectedRectImage,
     videoRef,
     canvasRef,
     captureImage,

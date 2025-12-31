@@ -9,6 +9,7 @@ export function CameraView() {
     isAnalyzing,
     hasSavedImage,
     candidates,
+    detectedRectImage,
     videoRef,
     canvasRef,
     captureImage,
@@ -49,6 +50,18 @@ export function CameraView() {
           muted
           className="hidden"
         />
+        
+        {/* 解析用画像の小窓表示 */}
+        {detectedRectImage && (
+          <div className="absolute top-4 right-4 bg-black bg-opacity-80 rounded-lg p-2 border-2 border-green-500">
+            <div className="text-white text-xs mb-1 font-semibold">解析用画像</div>
+            <img
+              src={detectedRectImage}
+              alt="検出されたカード領域"
+              className="w-32 h-auto rounded border border-green-400"
+            />
+          </div>
+        )}
       </div>
 
       {/* 操作ボタン */}
