@@ -195,6 +195,10 @@ export function useTarotReader(): UseTarotReaderReturn {
   const rectDetectionCountRef = useRef<number>(0);
   // カメラストリームを保持
   const cameraStreamRef = useRef<MediaStream | null>(null);
+  // 最後に矩形が検出された時刻を記録（一定時間有効化のため）
+  const lastDetectionTimeRef = useRef<number | null>(null);
+  // タイマーIDを保持
+  const detectionTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   // OpenCV.jsのロード
   useEffect(() => {
@@ -735,6 +739,23 @@ export function useTarotReader(): UseTarotReaderReturn {
                   );
                   const croppedImageData = cropCanvas.toDataURL('image/png');
                   setDetectedRectImage(croppedImageData);
+                  
+                  // 最後に検出された時刻を更新
+                  lastDetectionTimeRef.current = Date.now();
+                  
+                  // 既存のタイマーをクリア
+                  if (detectionTimeoutRef.current) {
+                    clearTimeout(detectionTimeoutRef.current);
+                  }
+                  
+                  // 一定時間（1秒）後に画像を無効化するタイマーを設定
+                  detectionTimeoutRef.current = setTimeout(() => {
+                    setDetectedRectImage(null);
+                    lastDetectionTimeRef.current = null;
+                    detectionTimeoutRef.current = null;
+                    console.log('[矩形検出] 一定時間検出されなかったため、画像を無効化しました');
+                  }, 1000); // 1秒
+                  
                   console.log(`[矩形検出成功] 頂点:`, points, `面積: ${maxArea.toFixed(0)}, 連続検出: ${rectDetectionCountRef.current}回, 切り出し画像: ${width}x${height}`);
                 } else {
                   console.warn('[矩形検出] 領域画像の切り出しに失敗しました');
@@ -764,6 +785,8 @@ export function useTarotReader(): UseTarotReaderReturn {
               console.log(`[矩形検出失敗] 最小面積を満たす輪郭が見つかりませんでした`);
             }
             rectDetectionCountRef.current = 0;
+            // 矩形が検出されなかった場合でも、一定時間内であれば画像を保持
+            // （タイマーは既に設定されているため、そのまま維持）
           }
           
           // メモリ解放
@@ -786,10 +809,8 @@ export function useTarotReader(): UseTarotReaderReturn {
         // detectedRectステートを更新
         setDetectedRect(detectedRectData);
         
-        // 矩形が検出されなかった場合は領域画像もクリア
-        if (!detectedRectData) {
-          setDetectedRectImage(null);
-        }
+        // 矩形が検出されなかった場合でも、一定時間内であれば画像を保持
+        // （タイマーで自動的にクリアされるため、ここでは何もしない）
         
         // メモリ解放
         src.delete();
@@ -1026,6 +1047,13 @@ export function useTarotReader(): UseTarotReaderReturn {
     setCandidates([]);
     setBlacklist([]);
     setDetectedRectImage(null);
+    
+    // タイマーもクリア
+    if (detectionTimeoutRef.current) {
+      clearTimeout(detectionTimeoutRef.current);
+      detectionTimeoutRef.current = null;
+    }
+    lastDetectionTimeRef.current = null;
   }, []);
 
   // ブラックリストに追加
@@ -1036,6 +1064,12 @@ export function useTarotReader(): UseTarotReaderReturn {
   // メモリ解放の自動化（クリーンアップ処理）
   useEffect(() => {
     return () => {
+      // タイマーをクリア
+      if (detectionTimeoutRef.current) {
+        clearTimeout(detectionTimeoutRef.current);
+        detectionTimeoutRef.current = null;
+      }
+      
       // ページを離れる際や再読み込み時に、Map内のcv.Matオブジェクトをすべて削除
       console.log('マスターデータのメモリを解放中...');
       const masterDataMap = masterDataMapRef.current;
