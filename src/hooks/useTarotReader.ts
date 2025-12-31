@@ -916,73 +916,168 @@ export function useTarotReader(): UseTarotReaderReturn {
 
       orb.detectAndCompute(gray, new window.cv.Mat(), keypoints, descriptors);
 
-      // BFMatcherでマッチング
+      // BFMatcherでマッチング（knnMatchを使用）
       matcher = createBFMatcher(window.cv.NORM_HAMMING, false);
       const matchResults: Map<string, number> = new Map();
+      const matchDetails: Map<string, { score: number; imageIndex: number; goodMatches: number; totalKeypoints: number }> = new Map();
 
       // すべてのマスターデータと比較
       for (const [cardName, master] of masterDataMapRef.current.entries()) {
-        let maxScore = 0; // このカードフォルダ内での最高スコア
+        let maxScore = 0; // このカードフォルダ内での最高スコア（正規化済み）
+        let bestImageIndex = -1;
+        let bestGoodMatches = 0;
+        let bestTotalKeypoints = 0;
 
         // このカードの全マスター画像と比較
         for (let imgIndex = 0; imgIndex < master.images.length; imgIndex++) {
           const masterImage = master.images[imgIndex];
-          const matches = new window.cv.DMatchVector();
-          matcher.match(descriptors, masterImage.descriptors, matches);
-
-          // Good Matchesを計算（距離が小さいものを厳格にフィルタリング）
-          const goodMatches: any[] = [];
-          const matchCount = matches.size();
+          const knnMatches = new window.cv.DMatchVectorVector();
           
-          // 距離の最小値を計算（より厳格なフィルタリングのため）
-          let minDistance = Infinity;
-          for (let i = 0; i < matchCount; i++) {
-            const match = matches.get(i);
-            if (match.distance < minDistance) {
-              minDistance = match.distance;
-            }
-          }
+          // knnMatch (k=2) を使用
+          matcher.knnMatch(descriptors, masterImage.descriptors, knnMatches, 2);
 
-          // Good Matches: 最小距離の2倍以下（Lowe's ratio testの簡易版）
-          const threshold = Math.max(30, minDistance * 2);
+          // Lowe's Ratio Test を適用
+          const goodMatches: any[] = [];
+          const matchCount = knnMatches.size();
+          
           for (let i = 0; i < matchCount; i++) {
-            const match = matches.get(i);
-            if (match.distance < threshold) {
-              goodMatches.push(match);
+            const matchPair = knnMatches.get(i);
+            if (matchPair.size() === 2) {
+              const first = matchPair.get(0);
+              const second = matchPair.get(1);
+              
+              // Lowe's Ratio Test: distance1 < 0.7 * distance2
+              if (first.distance < 0.7 * second.distance) {
+                goodMatches.push(first);
+              }
+            } else if (matchPair.size() === 1) {
+              // 2番目のマッチが見つからない場合は、1番目のマッチのみを使用
+              const first = matchPair.get(0);
+              goodMatches.push(first);
             }
+            
+            matchPair.delete();
           }
 
           const goodMatchCount = goodMatches.length;
+          const masterKeypointCount = masterImage.keypoints.size();
           
-          // この画像とのスコアが最高スコアを上回る場合は更新
-          if (goodMatchCount > maxScore) {
-            maxScore = goodMatchCount;
+          // ホモグラフィ変換による検証（Good Matchesが10点以上の場合）
+          let homographyScore = 1.0; // デフォルトは減点なし
+          if (goodMatchCount >= 10) {
+            try {
+              // マッチした特徴点の座標を取得
+              const srcPointsData: number[] = [];
+              const dstPointsData: number[] = [];
+              
+              for (const match of goodMatches) {
+                const queryIdx = match.queryIdx;
+                const trainIdx = match.trainIdx;
+                
+                if (queryIdx < keypoints.size() && trainIdx < masterImage.keypoints.size()) {
+                  const queryKp = keypoints.get(queryIdx);
+                  const trainKp = masterImage.keypoints.get(trainIdx);
+                  
+                  srcPointsData.push(queryKp.pt.x, queryKp.pt.y);
+                  dstPointsData.push(trainKp.pt.x, trainKp.pt.y);
+                }
+              }
+              
+              if (srcPointsData.length >= 8 && dstPointsData.length >= 8) {
+                const srcPointsMat = window.cv.matFromArray(
+                  srcPointsData.length / 2, 1, window.cv.CV_32FC2, srcPointsData
+                );
+                const dstPointsMat = window.cv.matFromArray(
+                  dstPointsData.length / 2, 1, window.cv.CV_32FC2, dstPointsData
+                );
+                
+                // ホモグラフィ変換を計算
+                const homography = window.cv.findHomography(
+                  srcPointsMat, dstPointsMat,
+                  window.cv.RANSAC, 5.0
+                );
+                
+                if (homography && !homography.empty()) {
+                  // ホモグラフィ変換が成功した場合はスコアを維持
+                  homographyScore = 1.0;
+                } else {
+                  // ホモグラフィ変換が失敗した場合はスコアを大幅に下げる
+                  homographyScore = 0.3;
+                }
+                
+                srcPointsMat.delete();
+                dstPointsMat.delete();
+                if (homography) homography.delete();
+              }
+            } catch (error) {
+              // ホモグラフィ変換の計算に失敗した場合は減点
+              console.warn(`[ホモグラフィ変換] ${cardName} 画像${imgIndex} の計算に失敗:`, error);
+              homographyScore = 0.5;
+            }
           }
 
-          matches.delete();
+          // 正規化スコアを計算: (Good Matches数 / マスター画像の特徴点総数) * 100
+          const normalizedScore = masterKeypointCount > 0
+            ? (goodMatchCount / masterKeypointCount) * 100 * homographyScore
+            : 0;
+          
+          console.log(`  [${cardName}] 画像${imgIndex + 1}/${master.images.length}: 
+            - 総マッチ数: ${matchCount}
+            - Ratio Test後: ${goodMatchCount} matches
+            - マスター特徴点数: ${masterKeypointCount}
+            - 正規化スコア: ${normalizedScore.toFixed(2)}%
+            - ホモグラフィ検証: ${homographyScore === 1.0 ? 'OK' : 'NG (減点)'}`);
+          
+          // この画像とのスコアが最高スコアを上回る場合は更新
+          if (normalizedScore > maxScore) {
+            maxScore = normalizedScore;
+            bestImageIndex = imgIndex;
+            bestGoodMatches = goodMatchCount;
+            bestTotalKeypoints = masterKeypointCount;
+          }
+
+          knnMatches.delete();
         }
 
         // このカードの最終スコアとして最高スコアを採用
         matchResults.set(cardName, maxScore);
-        console.log(`${master.displayName} (${cardName}): 最高スコア ${maxScore} matches (${master.images.length} 枚の画像と比較)`);
+        matchDetails.set(cardName, {
+          score: maxScore,
+          imageIndex: bestImageIndex,
+          goodMatches: bestGoodMatches,
+          totalKeypoints: bestTotalKeypoints,
+        });
+        
+        console.log(`✓ ${master.displayName} (${cardName}): 
+          最高スコア ${maxScore.toFixed(2)}% 
+          (画像${bestImageIndex + 1}/${master.images.length}が最高, 
+          Good Matches: ${bestGoodMatches}, 
+          特徴点数: ${bestTotalKeypoints})`);
       }
 
       // スコアが高い順にソートしてCandidate配列に変換
       const sortedCandidates: Candidate[] = Array.from(matchResults.entries())
         .sort(([, a], [, b]) => b - a)
-        .map(([cardName, matchCount]) => {
+        .map(([cardName, score]) => {
           const master = masterDataMapRef.current.get(cardName);
           return {
             cardName: master?.displayName || cardName,
-            matchCount,
+            matchCount: Math.round(score * 100) / 100, // 小数点2桁で表示
           };
         });
 
-      console.log('マッチング結果:', Array.from(matchResults.entries()).map(([name, count]) => {
-        const master = masterDataMapRef.current.get(name);
-        return `${master?.displayName || name}: ${count}`;
-      }).join(', '));
-      console.log('候補順位:', sortedCandidates.map(c => `${c.cardName}: ${c.matchCount} matches`));
+      console.log('\n=== マッチング結果サマリー ===');
+      console.log('スコア順位（正規化済み）:');
+      sortedCandidates.forEach((candidate, index) => {
+        const cardName = Array.from(masterDataMapRef.current.keys()).find(
+          name => masterDataMapRef.current.get(name)?.displayName === candidate.cardName
+        );
+        if (cardName) {
+          const details = matchDetails.get(cardName);
+          console.log(`  ${index + 1}. ${candidate.cardName}: ${candidate.matchCount.toFixed(2)}% ${details ? `(Good Matches: ${details.goodMatches}, 特徴点数: ${details.totalKeypoints})` : ''}`);
+        }
+      });
+      console.log('============================\n');
 
       setCandidates(sortedCandidates);
     } catch (error) {

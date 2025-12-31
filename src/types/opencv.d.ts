@@ -30,6 +30,9 @@ declare global {
       DMatchVector: {
         new (): any;
       };
+      DMatchVectorVector: {
+        new (): any;
+      };
       Canny: (image: any, edges: any, threshold1: number, threshold2: number, apertureSize?: number, L2gradient?: boolean) => void;
       threshold: (src: any, dst: any, thresh: number, maxval: number, type: number) => number;
       findContours: (image: any, contours: any, hierarchy: any, mode: number, method: number, offset?: any) => void;
@@ -72,6 +75,9 @@ declare global {
       CV_32FC2: number;
       getPerspectiveTransform: (src: any, dst: any) => any;
       warpPerspective: (src: any, dst: any, M: any, dsize: any, flags?: number, borderMode?: number, borderValue?: any) => void;
+      findHomography: (srcPoints: any, dstPoints: any, method?: number, ransacReprojThreshold?: number, mask?: any, maxIters?: number, confidence?: number) => any;
+      RANSAC: number;
+      LMEDS: number;
     };
   }
   
