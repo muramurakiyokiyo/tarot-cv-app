@@ -14,6 +14,7 @@ export function CameraView() {
     captureImage,
     deleteImage,
     addToBlacklist,
+    debugInfo,
   } = useTarotReader();
 
   return (
@@ -107,6 +108,21 @@ export function CameraView() {
           <p>すべての候補が除外されました。</p>
         </div>
       )}
+
+      {/* デバッグ情報表示 */}
+      <div className="fixed bottom-4 left-4 bg-black bg-opacity-75 text-white text-xs p-3 rounded-lg font-mono max-w-xs overflow-auto max-h-64">
+        <div className="font-bold mb-2">デバッグ情報</div>
+        <div>OpenCV: {isCvLoaded ? '✓' : '✗'}</div>
+        <div>Master: {isMasterReady ? '✓' : '✗'}</div>
+        <div>Analyzing: {isAnalyzing ? '✓' : '✗'}</div>
+        <div>Saved: {hasSavedImage ? '✓' : '✗'}</div>
+        <div className="mt-2 border-t border-gray-600 pt-2">
+          <div>Video ReadyState: {debugInfo.videoReadyState ?? 'N/A'}</div>
+          <div>Video Size: {debugInfo.videoWidth}x{debugInfo.videoHeight}</div>
+          <div>Canvas Size: {debugInfo.canvasWidth}x{debugInfo.canvasHeight}</div>
+          <div>Video Playing: {debugInfo.isVideoPlaying ? '✓' : '✗'}</div>
+        </div>
+      </div>
     </div>
   );
 }

@@ -17,6 +17,15 @@ interface DetectedRect {
   area: number;
 }
 
+interface DebugInfo {
+  videoReadyState: number | null;
+  videoWidth: number;
+  videoHeight: number;
+  canvasWidth: number;
+  canvasHeight: number;
+  isVideoPlaying: boolean;
+}
+
 interface UseTarotReaderReturn {
   isCvLoaded: boolean;
   isMasterReady: boolean;
@@ -30,6 +39,7 @@ interface UseTarotReaderReturn {
   captureImage: () => void;
   deleteImage: () => void;
   addToBlacklist: (card: string) => void;
+  debugInfo: DebugInfo;
 }
 
 const STORAGE_KEY = 'tarot-captured-image';
@@ -155,6 +165,14 @@ export function useTarotReader(): UseTarotReaderReturn {
   const [candidates, setCandidates] = useState<Candidate[]>([]);
   const [blacklist, setBlacklist] = useState<string[]>([]);
   const [detectedRect, setDetectedRect] = useState<DetectedRect | null>(null);
+  const [debugInfo, setDebugInfo] = useState<DebugInfo>({
+    videoReadyState: null,
+    videoWidth: 0,
+    videoHeight: 0,
+    canvasWidth: 0,
+    canvasHeight: 0,
+    isVideoPlaying: false,
+  });
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const animationFrameRef = useRef<number | null>(null);
@@ -346,6 +364,17 @@ export function useTarotReader(): UseTarotReaderReturn {
       animationFrameRef.current = requestAnimationFrame(drawLoop);
       return;
     }
+
+    // デバッグ情報を更新
+    const video = videoRef.current;
+    setDebugInfo({
+      videoReadyState: video?.readyState ?? null,
+      videoWidth: video?.videoWidth ?? 0,
+      videoHeight: video?.videoHeight ?? 0,
+      canvasWidth: canvas.width,
+      canvasHeight: canvas.height,
+      isVideoPlaying: !!(video && !video.paused && !video.ended && video.readyState > 2),
+    });
 
     // OpenCVが利用可能か確認
     if (!window.cv || !window.cv.Canny || !window.cv.findContours) {
@@ -906,6 +935,7 @@ export function useTarotReader(): UseTarotReaderReturn {
     captureImage,
     deleteImage,
     addToBlacklist,
+    debugInfo,
   };
 }
 
