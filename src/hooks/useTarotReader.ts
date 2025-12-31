@@ -94,6 +94,26 @@ const CARD_DISPLAY_NAMES: Record<string, string> = {
   WORLD: 'THE WORLD',
 };
 
+// 矩形の4点を左上、右上、右下、左下の順に並べ替える関数
+function sortRectanglePoints(points: Array<{ x: number; y: number }>): Array<{ x: number; y: number }> {
+  if (points.length !== 4) return points;
+  
+  // 各点を左上、右上、右下、左下に分類
+  // 左上: x+yが最小
+  // 右下: x+yが最大
+  // 右上: x-yが最大
+  // 左下: x-yが最小
+  const sum = points.map(p => ({ point: p, sum: p.x + p.y }));
+  const diff = points.map(p => ({ point: p, diff: p.x - p.y }));
+  
+  const leftTop = sum.reduce((min, p) => p.sum < min.sum ? p : min, sum[0]).point;
+  const rightBottom = sum.reduce((max, p) => p.sum > max.sum ? p : max, sum[0]).point;
+  const rightTop = diff.reduce((max, p) => p.diff > max.diff ? p : max, diff[0]).point;
+  const leftBottom = diff.reduce((min, p) => p.diff < min.diff ? p : min, diff[0]).point;
+  
+  return [leftTop, rightTop, rightBottom, leftBottom];
+}
+
 // 矩形の形状チェック関数（カードの形状に近いか確認）
 function checkRectangleShape(points: Array<{ x: number; y: number }>): boolean {
   if (points.length !== 4) return false;
@@ -674,6 +694,13 @@ export function useTarotReader(): UseTarotReaderReturn {
               // 矩形の形状チェック（カードの形状に近いか確認）
               const isValidRectangle = checkRectangleShape(points);
               
+              // 矩形の4点を左上、右上、右下、左下の順に並べ替え
+              if (isValidRectangle) {
+                const sortedPoints = sortRectanglePoints(points);
+                points.length = 0;
+                points.push(...sortedPoints);
+              }
+              
               if (isValidRectangle) {
                 detectedRectData = {
                   points,
@@ -952,95 +979,17 @@ export function useTarotReader(): UseTarotReaderReturn {
     }
   }, [isCvLoaded, createORB, createBFMatcher]);
 
-  // 画像を撮影（射影変換による高精度解析）
+  // 画像を撮影（小窓の画像をそのまま使用）
   const captureImage = useCallback(() => {
     if (!canvasRef.current || !videoRef.current || !isCvLoaded) return;
 
-    const video = videoRef.current;
     const canvas = canvasRef.current;
     let imageData: string;
 
-    // 検出された矩形がある場合は射影変換を実行
-    if (detectedRect && detectedRect.points.length === 4) {
-      let src: any = null;
-      let srcPointsMat: any = null;
-      let dstPointsMat: any = null;
-      let transformMat: any = null;
-      let dst: any = null;
-
-      try {
-        console.log('[撮影] 射影変換による高精度解析を実行します');
-
-        // ビデオフレームをCanvasに描画
-        const tempCanvas = document.createElement('canvas');
-        tempCanvas.width = video.videoWidth;
-        tempCanvas.height = video.videoHeight;
-        const tempCtx = tempCanvas.getContext('2d');
-        if (!tempCtx) {
-          console.error('[撮影] Canvasコンテキストの取得に失敗しました');
-          return;
-        }
-        tempCtx.drawImage(video, 0, 0, tempCanvas.width, tempCanvas.height);
-
-        // OpenCVで画像を読み込む
-        src = window.cv.imread(tempCanvas);
-        
-        // 射影変換のための4隅の座標
-        const srcPoints = detectedRect.points;
-        srcPointsMat = window.cv.matFromArray(4, 1, window.cv.CV_32FC2, [
-          srcPoints[0].x, srcPoints[0].y,
-          srcPoints[1].x, srcPoints[1].y,
-          srcPoints[2].x, srcPoints[2].y,
-          srcPoints[3].x, srcPoints[3].y,
-        ]);
-
-        // 補正後のサイズ（400x600px）
-        const dstWidth = 400;
-        const dstHeight = 600;
-        dstPointsMat = window.cv.matFromArray(4, 1, window.cv.CV_32FC2, [
-          0, 0,
-          dstWidth, 0,
-          dstWidth, dstHeight,
-          0, dstHeight,
-        ]);
-
-        // 射影変換行列を計算
-        transformMat = window.cv.getPerspectiveTransform(srcPointsMat, dstPointsMat);
-
-        // 射影変換を実行
-        dst = new window.cv.Mat();
-        window.cv.warpPerspective(src, dst, transformMat, new window.cv.Size(dstWidth, dstHeight));
-
-        // 補正済み画像をCanvasに描画してDataURLに変換
-        const correctedCanvas = document.createElement('canvas');
-        correctedCanvas.width = dstWidth;
-        correctedCanvas.height = dstHeight;
-        const correctedCtx = correctedCanvas.getContext('2d');
-        if (correctedCtx) {
-          const imgData = new ImageData(
-            new Uint8ClampedArray(dst.data),
-            dst.cols,
-            dst.rows
-          );
-          correctedCtx.putImageData(imgData, 0, 0);
-          imageData = correctedCanvas.toDataURL('image/png');
-          console.log('[撮影] 射影変換完了: 補正済み画像サイズ', dstWidth, 'x', dstHeight);
-        } else {
-          throw new Error('補正済みCanvasのコンテキスト取得に失敗');
-        }
-      } catch (error) {
-        console.error('[撮影] 射影変換エラー:', error);
-        // エラー時は通常の方法で撮影
-        imageData = canvas.toDataURL('image/png');
-        console.log('[撮影] 通常の方法で撮影します');
-      } finally {
-        // メモリ解放（エラーが発生しても確実に解放）
-        if (src) src.delete();
-        if (srcPointsMat) srcPointsMat.delete();
-        if (dstPointsMat) dstPointsMat.delete();
-        if (transformMat) transformMat.delete();
-        if (dst) dst.delete();
-      }
+    // 小窓に表示されている画像（detectedRectImage）がある場合はそれを使用
+    if (detectedRectImage) {
+      imageData = detectedRectImage;
+      console.log('[撮影] 小窓の画像をそのまま使用します');
     } else {
       // 矩形が検出されていない場合は、現在のCanvas全体を使用
       imageData = canvas.toDataURL('image/png');
@@ -1055,8 +1004,8 @@ export function useTarotReader(): UseTarotReaderReturn {
     setHasSavedImage(true);
     
     // カメラストリームを停止
-    if (video.srcObject) {
-      const stream = video.srcObject as MediaStream;
+    if (videoRef.current && videoRef.current.srcObject) {
+      const stream = videoRef.current.srcObject as MediaStream;
       stream.getTracks().forEach((track) => track.stop());
     }
 
@@ -1066,7 +1015,7 @@ export function useTarotReader(): UseTarotReaderReturn {
       performMatching(img);
     };
     img.src = imageData;
-  }, [isCvLoaded, performMatching, detectedRect]);
+  }, [isCvLoaded, performMatching, detectedRectImage]);
 
   // 画像を削除
   const deleteImage = useCallback(() => {

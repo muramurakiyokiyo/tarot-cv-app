@@ -13,6 +13,7 @@ declare global {
       cvtColor: (src: any, dst: any, code: number, dstCn?: number) => void;
       COLOR_RGBA2GRAY: number;
       COLOR_GRAY2RGBA: number;
+      COLOR_BGR2RGBA: number;
       addWeighted: (src1: any, alpha: number, src2: any, beta: number, gamma: number, dst: any) => void;
       bitwise_not: (src: any, dst: any) => void;
       waitKey: (delay: number) => number;
