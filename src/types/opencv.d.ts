@@ -16,12 +16,71 @@ declare global {
       bitwise_not: (src: any, dst: any) => void;
       waitKey: (delay: number) => number;
       onRuntimeInitialized: () => void;
+      ORB: {
+        new (maxFeatures?: number): any;
+        create: (maxFeatures?: number) => any;
+      };
+      BFMatcher: {
+        new (normType?: number, crossCheck?: boolean): any;
+        create: (normType?: number, crossCheck?: boolean) => any;
+      };
+      NORM_HAMMING: number;
+      NORM_HAMMING2: number;
+      KeyPointVector: {
+        new (): any;
+      };
+      DMatchVector: {
+        new (): any;
+      };
     };
   }
   
   interface Mat {
     convertTo: (dst: any, type: number, alpha?: number, beta?: number) => void;
     delete: () => void;
+    rows: number;
+    cols: number;
+  }
+  
+  interface ORB {
+    detectAndCompute: (image: any, mask: any, keypoints: any, descriptors: any) => void;
+    delete: () => void;
+  }
+  
+  interface BFMatcher {
+    match: (descriptors1: any, descriptors2: any, matches: any) => void;
+    knnMatch: (descriptors1: any, descriptors2: any, k: number, matches: any, mask?: any) => void;
+    delete: () => void;
+  }
+  
+  interface KeyPointVector {
+    size: () => number;
+    get: (index: number) => any;
+    push_back: (keypoint: any) => void;
+    delete: () => void;
+  }
+  
+  interface DMatchVector {
+    size: () => number;
+    get: (index: number) => any;
+    push_back: (match: any) => void;
+    delete: () => void;
+  }
+  
+  interface KeyPoint {
+    pt: { x: number; y: number };
+    size: number;
+    angle: number;
+    response: number;
+    octave: number;
+    class_id: number;
+  }
+  
+  interface DMatch {
+    queryIdx: number;
+    trainIdx: number;
+    imgIdx: number;
+    distance: number;
   }
 }
 

@@ -2,8 +2,14 @@
 
 import { useState, useEffect, useRef, useCallback } from 'react';
 
+interface MasterData {
+  keypoints: any;
+  descriptors: any;
+}
+
 interface UseTarotReaderReturn {
   isCvLoaded: boolean;
+  isAnalyzing: boolean;
   hasSavedImage: boolean;
   candidates: string[];
   blacklist: string[];
@@ -18,6 +24,7 @@ const STORAGE_KEY = 'tarot-captured-image';
 
 export function useTarotReader(): UseTarotReaderReturn {
   const [isCvLoaded, setIsCvLoaded] = useState(false);
+  const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [hasSavedImage, setHasSavedImage] = useState(false);
   const [candidates, setCandidates] = useState<string[]>([]);
   const [blacklist, setBlacklist] = useState<string[]>([]);
@@ -26,6 +33,7 @@ export function useTarotReader(): UseTarotReaderReturn {
   const animationFrameRef = useRef<number | null>(null);
   const savedImageRef = useRef<string | null>(null);
   const savedImageElementRef = useRef<HTMLImageElement | null>(null);
+  const masterDataRef = useRef<Record<string, MasterData>>({});
 
   // OpenCV.jsのロード
   useEffect(() => {
@@ -57,13 +65,71 @@ export function useTarotReader(): UseTarotReaderReturn {
     };
   }, []);
 
+  // マスターデータのロードとORB特徴量計算
+  useEffect(() => {
+    if (!isCvLoaded) return;
+
+    const loadMasterData = async (cardName: string, imagePath: string): Promise<void> => {
+      return new Promise((resolve, reject) => {
+        const img = new Image();
+        img.onload = () => {
+          try {
+            const src = window.cv.imread(img);
+            const gray = new window.cv.Mat();
+            window.cv.cvtColor(src, gray, window.cv.COLOR_RGBA2GRAY);
+
+            const orb = window.cv.ORB.create(500);
+            const keypoints = new window.cv.KeyPointVector();
+            const descriptors = new window.cv.Mat();
+
+            orb.detectAndCompute(gray, new window.cv.Mat(), keypoints, descriptors);
+
+            masterDataRef.current[cardName] = {
+              keypoints,
+              descriptors,
+            };
+
+            console.log(`${cardName}: 特徴点 ${keypoints.size()} 個、記述子サイズ ${descriptors.rows}x${descriptors.cols}`);
+
+            // メモリ解放（keypointsとdescriptorsは保持するため削除しない）
+            src.delete();
+            gray.delete();
+            orb.delete();
+
+            resolve();
+          } catch (error) {
+            console.error(`${cardName}の特徴量計算エラー:`, error);
+            reject(error);
+          }
+        };
+        img.onerror = () => {
+          console.error(`${cardName}の画像ロードエラー: ${imagePath}`);
+          reject(new Error(`Failed to load ${imagePath}`));
+        };
+        img.src = imagePath;
+      });
+    };
+
+    const initializeMasterData = async () => {
+      try {
+        await loadMasterData('THE SUN', '/master/SUN.jpg');
+        await loadMasterData('THE FOOL', '/master/FOOL.jpg');
+        console.log('マスターデータの初期化が完了しました');
+      } catch (error) {
+        console.error('マスターデータの初期化エラー:', error);
+      }
+    };
+
+    initializeMasterData();
+  }, [isCvLoaded]);
+
   // 保存済み画像の復元
   useEffect(() => {
     const saved = localStorage.getItem(STORAGE_KEY);
     if (saved) {
       savedImageRef.current = saved;
       setHasSavedImage(true);
-      setCandidates(['THE SUN', 'THE FOOL', 'THE MAGICIAN']);
+      // 復元時は解析を実行しない（ユーザーが再撮影するまで待つ）
     }
   }, []);
 
@@ -177,6 +243,79 @@ export function useTarotReader(): UseTarotReaderReturn {
     };
   }, [hasSavedImage]);
 
+  // 画像マッチング処理
+  const performMatching = useCallback(async (imageElement: HTMLImageElement | HTMLCanvasElement) => {
+    if (!isCvLoaded || Object.keys(masterDataRef.current).length === 0) {
+      console.warn('OpenCVがロードされていないか、マスターデータが初期化されていません');
+      return;
+    }
+
+    setIsAnalyzing(true);
+
+    try {
+      // 撮影画像の特徴量を抽出
+      const src = window.cv.imread(imageElement);
+      const gray = new window.cv.Mat();
+      window.cv.cvtColor(src, gray, window.cv.COLOR_RGBA2GRAY);
+
+      const orb = window.cv.ORB.create(500);
+      const keypoints = new window.cv.KeyPointVector();
+      const descriptors = new window.cv.Mat();
+
+      orb.detectAndCompute(gray, new window.cv.Mat(), keypoints, descriptors);
+
+      // BFMatcherでマッチング
+      const matcher = window.cv.BFMatcher.create(window.cv.NORM_HAMMING, false);
+      const matchResults: Record<string, number> = {};
+
+      for (const [cardName, master] of Object.entries(masterDataRef.current)) {
+        const matches = new window.cv.DMatchVector();
+        matcher.match(descriptors, master.descriptors, matches);
+
+        // Good Matchesを計算（距離が小さいものをフィルタリング）
+        const goodMatches: any[] = [];
+        const matchCount = matches.size();
+        
+        for (let i = 0; i < matchCount; i++) {
+          const match = matches.get(i);
+          if (match.distance < 50) { // 閾値は調整可能
+            goodMatches.push(match);
+          }
+        }
+
+        const goodMatchCount = goodMatches.length;
+        matchResults[cardName] = goodMatchCount;
+        
+        console.log(`${cardName}: 総マッチ数 ${matchCount}, Good Matches ${goodMatchCount}`);
+
+        matches.delete();
+      }
+
+      // スコアが高い順にソート
+      const sortedCards = Object.entries(matchResults)
+        .sort(([, a], [, b]) => b - a)
+        .map(([cardName]) => cardName);
+
+      console.log('マッチング結果:', matchResults);
+      console.log('候補順位:', sortedCards);
+
+      setCandidates(sortedCards);
+
+      // メモリ解放
+      src.delete();
+      gray.delete();
+      orb.delete();
+      keypoints.delete();
+      descriptors.delete();
+      matcher.delete();
+    } catch (error) {
+      console.error('マッチング処理エラー:', error);
+      setCandidates([]);
+    } finally {
+      setIsAnalyzing(false);
+    }
+  }, [isCvLoaded]);
+
   // 画像を撮影
   const captureImage = useCallback(() => {
     if (!canvasRef.current || !videoRef.current || !isCvLoaded) return;
@@ -193,14 +332,20 @@ export function useTarotReader(): UseTarotReaderReturn {
     
     // 状態更新
     setHasSavedImage(true);
-    setCandidates(['THE SUN', 'THE FOOL', 'THE MAGICIAN']);
     
     // カメラストリームを停止
     if (video.srcObject) {
       const stream = video.srcObject as MediaStream;
       stream.getTracks().forEach((track) => track.stop());
     }
-  }, [isCvLoaded]);
+
+    // 画像をロードしてマッチング処理を実行
+    const img = new Image();
+    img.onload = () => {
+      performMatching(img);
+    };
+    img.src = imageData;
+  }, [isCvLoaded, performMatching]);
 
   // 画像を削除
   const deleteImage = useCallback(() => {
@@ -222,6 +367,7 @@ export function useTarotReader(): UseTarotReaderReturn {
 
   return {
     isCvLoaded,
+    isAnalyzing,
     hasSavedImage,
     candidates: filteredCandidates,
     blacklist,

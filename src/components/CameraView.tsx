@@ -5,6 +5,7 @@ import { useTarotReader } from '@/src/hooks/useTarotReader';
 export function CameraView() {
   const {
     isCvLoaded,
+    isAnalyzing,
     hasSavedImage,
     candidates,
     videoRef,
@@ -18,8 +19,13 @@ export function CameraView() {
     <div className="flex flex-col items-center justify-center min-h-screen bg-gray-900 p-4">
       {/* ステータス表示 */}
       {!isCvLoaded && (
-        <div className="absolute top-4 left-4 bg-yellow-500 text-white px-4 py-2 rounded">
+        <div className="absolute top-4 left-4 bg-yellow-500 text-white px-4 py-2 rounded z-10">
           OpenCV.jsをロード中...
+        </div>
+      )}
+      {isAnalyzing && (
+        <div className="absolute top-4 left-4 bg-blue-500 text-white px-4 py-2 rounded z-10">
+          画像を解析中...
         </div>
       )}
 
