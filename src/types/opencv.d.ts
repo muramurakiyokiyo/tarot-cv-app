@@ -16,16 +16,10 @@ declare global {
       bitwise_not: (src: any, dst: any) => void;
       waitKey: (delay: number) => number;
       onRuntimeInitialized: () => void;
-      ORB: {
-        new (maxFeatures?: number): any;
-        create: (maxFeatures?: number) => any;
-      };
-      ORB_create: (maxFeatures?: number) => any;
-      BFMatcher: {
-        new (normType?: number, crossCheck?: boolean): any;
-        create: (normType?: number, crossCheck?: boolean) => any;
-      };
-      BFMatcher_create: (normType?: number, crossCheck?: boolean) => any;
+      ORB: any;
+      ORB_create?: (maxFeatures?: number) => any;
+      BFMatcher: any;
+      BFMatcher_create?: (normType?: number, crossCheck?: boolean) => any;
       NORM_HAMMING: number;
       NORM_HAMMING2: number;
       KeyPointVector: {
@@ -34,6 +28,30 @@ declare global {
       DMatchVector: {
         new (): any;
       };
+      Canny: (image: any, edges: any, threshold1: number, threshold2: number, apertureSize?: number, L2gradient?: boolean) => void;
+      threshold: (src: any, dst: any, thresh: number, maxval: number, type: number) => number;
+      findContours: (image: any, contours: any, hierarchy: any, mode: number, method: number, offset?: any) => void;
+      contourArea: (contour: any, oriented?: boolean) => number;
+      approxPolyDP: (curve: any, approxCurve: any, epsilon: number, closed: boolean) => void;
+      arcLength: (curve: any, closed: boolean) => number;
+      ContourVector: {
+        new (): any;
+      };
+      PointVector: {
+        new (): any;
+      };
+      RETR_EXTERNAL: number;
+      RETR_LIST: number;
+      RETR_CCOMP: number;
+      RETR_TREE: number;
+      CHAIN_APPROX_SIMPLE: number;
+      CHAIN_APPROX_NONE: number;
+      THRESH_BINARY: number;
+      THRESH_BINARY_INV: number;
+      THRESH_TRUNC: number;
+      THRESH_TOZERO: number;
+      THRESH_TOZERO_INV: number;
+      THRESH_OTSU: number;
     };
   }
   
@@ -83,6 +101,20 @@ declare global {
     trainIdx: number;
     imgIdx: number;
     distance: number;
+  }
+  
+  interface ContourVector {
+    size: () => number;
+    get: (index: number) => any;
+    push_back: (contour: any) => void;
+    delete: () => void;
+  }
+  
+  interface PointVector {
+    size: () => number;
+    get: (index: number) => { x: number; y: number };
+    push_back: (point: any) => void;
+    delete: () => void;
   }
 }
 

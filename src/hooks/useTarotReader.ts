@@ -12,6 +12,11 @@ interface Candidate {
   matchCount: number;
 }
 
+interface DetectedRect {
+  points: Array<{ x: number; y: number }>;
+  area: number;
+}
+
 interface UseTarotReaderReturn {
   isCvLoaded: boolean;
   isMasterReady: boolean;
@@ -19,8 +24,9 @@ interface UseTarotReaderReturn {
   hasSavedImage: boolean;
   candidates: Candidate[];
   blacklist: string[];
-  videoRef: React.RefObject<HTMLVideoElement>;
-  canvasRef: React.RefObject<HTMLCanvasElement>;
+  detectedRect: DetectedRect | null;
+  videoRef: React.RefObject<HTMLVideoElement | null>;
+  canvasRef: React.RefObject<HTMLCanvasElement | null>;
   captureImage: () => void;
   deleteImage: () => void;
   addToBlacklist: (card: string) => void;
@@ -87,6 +93,7 @@ export function useTarotReader(): UseTarotReaderReturn {
   const [hasSavedImage, setHasSavedImage] = useState(false);
   const [candidates, setCandidates] = useState<Candidate[]>([]);
   const [blacklist, setBlacklist] = useState<string[]>([]);
+  const [detectedRect, setDetectedRect] = useState<DetectedRect | null>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const animationFrameRef = useRef<number | null>(null);
@@ -94,6 +101,8 @@ export function useTarotReader(): UseTarotReaderReturn {
   const savedImageElementRef = useRef<HTMLImageElement | null>(null);
   // Map構造で特徴量をキャッシュ
   const masterDataMapRef = useRef<Map<string, MasterData>>(new Map());
+  // 矩形検出の安定性を追跡（自動撮影の準備）
+  const rectDetectionCountRef = useRef<number>(0);
 
   // OpenCV.jsのロード
   useEffect(() => {
@@ -293,13 +302,103 @@ export function useTarotReader(): UseTarotReaderReturn {
         // Canvasに描画
         window.cv.imshow(canvas, contrast);
         
+        // 輪郭検出処理（カードの矩形を検出）
+        let detectedRectData: DetectedRect | null = null;
+        try {
+          // Cannyエッジ検出
+          const edges = new window.cv.Mat();
+          window.cv.Canny(contrast, edges, 50, 150, 3, false);
+          
+          // 輪郭を検出
+          const contours = new window.cv.ContourVector();
+          const hierarchy = new window.cv.Mat();
+          window.cv.findContours(
+            edges,
+            contours,
+            hierarchy,
+            window.cv.RETR_EXTERNAL,
+            window.cv.CHAIN_APPROX_SIMPLE
+          );
+          
+          // 画像全体の面積の10%以上を最小面積として設定
+          const minArea = (canvas.width * canvas.height) * 0.1;
+          let maxArea = 0;
+          let largestContour: any = null;
+          
+          // 最大の輪郭を探す
+          for (let i = 0; i < contours.size(); i++) {
+            const contour = contours.get(i);
+            const area = window.cv.contourArea(contour, false);
+            
+            if (area > maxArea && area >= minArea) {
+              maxArea = area;
+              largestContour = contour;
+            }
+          }
+          
+          // 最大の輪郭が見つかった場合、矩形に近似
+          if (largestContour) {
+            const approx = new window.cv.PointVector();
+            const epsilon = 0.02 * window.cv.arcLength(largestContour, true);
+            window.cv.approxPolyDP(largestContour, approx, epsilon, true);
+            
+            // 頂点が4つの矩形を探す
+            if (approx.size() === 4) {
+              const points: Array<{ x: number; y: number }> = [];
+              for (let i = 0; i < 4; i++) {
+                const point = approx.get(i);
+                points.push({ x: point.x, y: point.y });
+              }
+              
+              detectedRectData = {
+                points,
+                area: maxArea,
+              };
+              
+              // 矩形検出の安定性を追跡
+              rectDetectionCountRef.current += 1;
+              
+              // 矩形をCanvas上に緑色の枠線で描画
+              ctx.strokeStyle = '#00ff00';
+              ctx.lineWidth = 3;
+              ctx.beginPath();
+              ctx.moveTo(points[0].x, points[0].y);
+              for (let i = 1; i < points.length; i++) {
+                ctx.lineTo(points[i].x, points[i].y);
+              }
+              ctx.closePath();
+              ctx.stroke();
+            } else {
+              rectDetectionCountRef.current = 0;
+            }
+            
+            approx.delete();
+          } else {
+            rectDetectionCountRef.current = 0;
+          }
+          
+          // メモリ解放
+          edges.delete();
+          contours.delete();
+          hierarchy.delete();
+        } catch (contourError) {
+          // 輪郭検出エラーは無視（処理を続行）
+          console.warn('輪郭検出エラー:', contourError);
+          rectDetectionCountRef.current = 0;
+        }
+        
+        // detectedRectステートを更新
+        setDetectedRect(detectedRectData);
+        
         // メモリ解放
         src.delete();
         gray.delete();
         contrast.delete();
-      } catch (error) {
+      } catch {
         // OpenCV処理が失敗した場合は通常描画
         ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+        setDetectedRect(null);
+        rectDetectionCountRef.current = 0;
       }
     }
 
@@ -509,6 +608,7 @@ export function useTarotReader(): UseTarotReaderReturn {
     hasSavedImage,
     candidates: filteredCandidates,
     blacklist,
+    detectedRect,
     videoRef,
     canvasRef,
     captureImage,
